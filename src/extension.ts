@@ -5,6 +5,7 @@ import { ChatPanel } from "./chatPanel";
 import { SageLLMInlineCompletionProvider } from "./inlineCompletion";
 import { StatusBarManager } from "./statusBar";
 import { checkHealth, GatewayConnectionError } from "./gatewayClient";
+import { promptAndStartServer } from "./serverLauncher";
 
 let gatewayProcess: cp.ChildProcess | null = null;
 let statusBar: StatusBarManager | null = null;
@@ -73,7 +74,11 @@ export async function activate(
     }),
 
     vscode.commands.registerCommand("sagellm.startGateway", () =>
-      startGateway(statusBar!)
+      promptAndStartServer(context, statusBar)
+    ),
+
+    vscode.commands.registerCommand("sagellm.configureServer", () =>
+      promptAndStartServer(context, statusBar)
     ),
 
     vscode.commands.registerCommand("sagellm.stopGateway", () =>
@@ -122,7 +127,15 @@ export async function activate(
   // ── Auto-start gateway if configured ──────────────────────────────────────
   const cfg = vscode.workspace.getConfiguration("sagellm");
   if (cfg.get<boolean>("autoStartGateway", true)) {
-    startGateway(statusBar);
+    const savedModel = cfg.get<string>("preloadModel", "").trim();
+    const savedBackend = cfg.get<string>("backend", "").trim();
+    if (savedModel && savedBackend) {
+      // Silent auto-start: model + backend already configured
+      startGateway(statusBar);
+    } else {
+      // First time or not yet configured: show picker after short delay
+      setTimeout(() => promptAndStartServer(context, statusBar), 1500);
+    }
   }
 
   // ── Background health check every 30s ─────────────────────────────────────
@@ -149,15 +162,14 @@ export async function activate(
       await modelManager.refresh().catch(() => {});
       modelsProvider.refresh();
       statusBar?.setModel(modelManager.currentModel);
-    } else if (!cfg.get<boolean>("autoStartGateway", true)) {
-      // Only prompt if auto-start is disabled (otherwise startGateway already ran)
+    } else {
       const choice = await vscode.window.showWarningMessage(
-        "SageLLM: Gateway not reachable. Start it now?",
-        "Start Gateway",
+        "SageLLM: Gateway not reachable. Configure and start now?",
+        "Configure Server",
         "Dismiss"
       );
-      if (choice === "Start Gateway") {
-        vscode.commands.executeCommand("sagellm.startGateway");
+      if (choice === "Configure Server") {
+        vscode.commands.executeCommand("sagellm.configureServer");
       }
     }
   }, 2000);
@@ -177,17 +189,18 @@ function startGateway(sb: StatusBarManager | null): void {
   const baseCmd = cfg.get<string>("gatewayStartCommand", "sagellm serve");
   const port = cfg.get<number>("gateway.port", 8901);
   const preloadModel = cfg.get<string>("preloadModel", "").trim();
+  const backend = cfg.get<string>("backend", "").trim();
 
   if (gatewayProcess && !gatewayProcess.killed) {
     vscode.window.showInformationMessage("SageLLM: Gateway is already running");
     return;
   }
 
-  // Build full command: base + --port <port> + optional --model <model>
-  let cmd = `${baseCmd} --port ${port}`;
-  if (preloadModel) {
-    cmd += ` --model ${preloadModel}`;
-  }
+  // Build full command
+  let cmd = baseCmd;
+  if (backend) cmd += ` --backend ${backend}`;
+  if (preloadModel) cmd += ` --model ${preloadModel}`;
+  cmd += ` --port ${port}`;
 
   const terminal = vscode.window.createTerminal({
     name: "SageLLM Gateway",
