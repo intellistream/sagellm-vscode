@@ -2,7 +2,7 @@
   "name": "sagellm-vscode",
   "displayName": "SageLLM",
   "description": "SageLLM inference engine integration for VS Code — chat, code completion, and model management via sagellm-gateway",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "intellistream",
   "license": "MIT",
   "icon": "media/icon.png",
