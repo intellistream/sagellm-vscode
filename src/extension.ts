@@ -121,7 +121,7 @@ export async function activate(
 
   // ── Auto-start gateway if configured ──────────────────────────────────────
   const cfg = vscode.workspace.getConfiguration("sagellm");
-  if (cfg.get<boolean>("autoStartGateway", false)) {
+  if (cfg.get<boolean>("autoStartGateway", true)) {
     startGateway(statusBar);
   }
 
@@ -149,6 +149,16 @@ export async function activate(
       await modelManager.refresh().catch(() => {});
       modelsProvider.refresh();
       statusBar?.setModel(modelManager.currentModel);
+    } else if (!cfg.get<boolean>("autoStartGateway", true)) {
+      // Only prompt if auto-start is disabled (otherwise startGateway already ran)
+      const choice = await vscode.window.showWarningMessage(
+        "SageLLM: Gateway not reachable. Start it now?",
+        "Start Gateway",
+        "Dismiss"
+      );
+      if (choice === "Start Gateway") {
+        vscode.commands.executeCommand("sagellm.startGateway");
+      }
     }
   }, 2000);
 }
@@ -164,11 +174,19 @@ export function deactivate(): void {
 
 function startGateway(sb: StatusBarManager | null): void {
   const cfg = vscode.workspace.getConfiguration("sagellm");
-  const cmd = cfg.get<string>("gatewayStartCommand", "sagellm gateway start");
+  const baseCmd = cfg.get<string>("gatewayStartCommand", "sagellm serve");
+  const port = cfg.get<number>("gateway.port", 8901);
+  const preloadModel = cfg.get<string>("preloadModel", "").trim();
 
   if (gatewayProcess && !gatewayProcess.killed) {
     vscode.window.showInformationMessage("SageLLM: Gateway is already running");
     return;
+  }
+
+  // Build full command: base + --port <port> + optional --model <model>
+  let cmd = `${baseCmd} --port ${port}`;
+  if (preloadModel) {
+    cmd += ` --model ${preloadModel}`;
   }
 
   const terminal = vscode.window.createTerminal({

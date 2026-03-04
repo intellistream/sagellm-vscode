@@ -2,7 +2,7 @@
   "name": "sagellm-vscode",
   "displayName": "SageLLM",
   "description": "SageLLM inference engine integration for VS Code — chat, code completion, and model management via sagellm-gateway",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "intellistream",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -123,8 +123,8 @@
         },
         "sagellm.gateway.port": {
           "type": "number",
-          "default": 8000,
-          "description": "Port for sagellm-gateway (default: 8000)"
+          "default": 8901,
+          "description": "Port for sagellm-gateway / sagellm serve (default: 8901)"
         },
         "sagellm.gateway.apiKey": {
           "type": "string",
@@ -144,13 +144,18 @@
         },
         "sagellm.autoStartGateway": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically start sagellm-gateway on VS Code startup"
         },
         "sagellm.gatewayStartCommand": {
           "type": "string",
-          "default": "sagellm gateway start",
-          "description": "Shell command to start the sagellm gateway"
+          "default": "sagellm serve",
+          "description": "Base command to start the sagellm server (e.g. 'sagellm serve' or 'sagellm-gateway')"
+        },
+        "sagellm.preloadModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model to pre-load on startup (appended as --model <value> to gatewayStartCommand). Leave empty to use sagellm's default config."
         },
         "sagellm.inlineCompletion.enabled": {
           "type": "boolean",
