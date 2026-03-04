@@ -1,0 +1,211 @@
+{
+  "name": "sagellm-vscode",
+  "displayName": "SageLLM",
+  "description": "SageLLM inference engine integration for VS Code — chat, code completion, and model management via sagellm-gateway",
+  "version": "0.1.0",
+  "publisher": "intellistream",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/intellistream/sagellm-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/intellistream/sagellm-vscode/issues"
+  },
+  "homepage": "https://github.com/intellistream/sagellm-vscode#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "sagellm",
+    "llm",
+    "ai",
+    "chat",
+    "code completion",
+    "intellistream"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sagellm.openChat",
+        "title": "SageLLM: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "sagellm.selectModel",
+        "title": "SageLLM: Select Model",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "sagellm.startGateway",
+        "title": "SageLLM: Start Gateway",
+        "icon": "$(play)"
+      },
+      {
+        "command": "sagellm.stopGateway",
+        "title": "SageLLM: Stop Gateway",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "sagellm.showInstallGuide",
+        "title": "SageLLM: Installation Guide",
+        "icon": "$(book)"
+      },
+      {
+        "command": "sagellm.refreshModels",
+        "title": "SageLLM: Refresh Models",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "sagellm.checkConnection",
+        "title": "SageLLM: Check Connection",
+        "icon": "$(plug)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sagellm-sidebar",
+          "title": "SageLLM",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "sagellm-sidebar": [
+        {
+          "type": "webview",
+          "id": "sagellm.chatView",
+          "name": "Chat",
+          "icon": "$(comment-discussion)"
+        },
+        {
+          "id": "sagellm.modelsView",
+          "name": "Models",
+          "icon": "$(list-unordered)"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "sagellm.openChat",
+          "when": "editorHasSelection",
+          "group": "sagellm@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "sagellm.refreshModels",
+          "when": "view == sagellm.modelsView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "SageLLM",
+      "properties": {
+        "sagellm.gateway.host": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Host where sagellm-gateway is running"
+        },
+        "sagellm.gateway.port": {
+          "type": "number",
+          "default": 8000,
+          "description": "Port for sagellm-gateway (default: 8000)"
+        },
+        "sagellm.gateway.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for sagellm-gateway (leave empty if not required)",
+          "secret": true
+        },
+        "sagellm.gateway.tls": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use HTTPS/TLS for gateway connection"
+        },
+        "sagellm.model": {
+          "type": "string",
+          "default": "",
+          "description": "Default model to use (leave empty to be prompted on first use)"
+        },
+        "sagellm.autoStartGateway": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start sagellm-gateway on VS Code startup"
+        },
+        "sagellm.gatewayStartCommand": {
+          "type": "string",
+          "default": "sagellm gateway start",
+          "description": "Shell command to start the sagellm gateway"
+        },
+        "sagellm.inlineCompletion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline code completion powered by SageLLM"
+        },
+        "sagellm.inlineCompletion.triggerDelay": {
+          "type": "number",
+          "default": 400,
+          "description": "Milliseconds to wait before triggering inline completion"
+        },
+        "sagellm.chat.systemPrompt": {
+          "type": "string",
+          "default": "You are a helpful AI assistant integrated into VS Code. You help with coding, debugging, and explanations.",
+          "description": "System prompt for chat conversations"
+        },
+        "sagellm.chat.maxTokens": {
+          "type": "number",
+          "default": 2048,
+          "description": "Maximum tokens per chat response"
+        },
+        "sagellm.chat.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature for chat (0 = deterministic, 2 = very creative)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-cli": "^0.0.9",
+    "@vscode/test-electron": "^2.3.9",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.3.0"
+  }
+}
