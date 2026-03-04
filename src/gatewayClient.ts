@@ -249,6 +249,42 @@ export async function streamChatCompletion(
   });
 }
 
+export interface TextCompletionRequest {
+  model: string;
+  prompt: string;
+  max_tokens?: number;
+  temperature?: number;
+  stop?: string[];
+}
+
+/**
+ * POST to /v1/completions — native FIM endpoint.
+ * Throws GatewayConnectionError with statusCode 404 if not supported by this gateway.
+ */
+export async function rawTextCompletion(
+  request: TextCompletionRequest
+): Promise<string> {
+  const { baseUrl, apiKey } = getConfig();
+  const body = JSON.stringify({ ...request, stream: false });
+  const { statusCode, data } = await makeRequest(
+    "POST",
+    `${baseUrl}/v1/completions`,
+    apiKey,
+    body
+  );
+  if (statusCode === 404) {
+    throw new GatewayConnectionError("Endpoint /v1/completions not available", 404);
+  }
+  if (statusCode !== 200) {
+    throw new GatewayConnectionError(
+      `Gateway returned HTTP ${statusCode}: ${data}`,
+      statusCode
+    );
+  }
+  const resp = JSON.parse(data) as { choices: Array<{ text: string }> };
+  return resp.choices?.[0]?.text ?? "";
+}
+
 /** Non-streaming completion (for inline completion where we need the full result) */
 export async function chatCompletion(
   request: ChatCompletionRequest

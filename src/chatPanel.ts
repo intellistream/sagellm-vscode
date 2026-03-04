@@ -88,6 +88,22 @@ export class ChatPanel {
     this.panel.webview.postMessage({ type: "insertText", text });
   }
 
+  /** Open chat and immediately send an action message (explain / test / fix / etc.) */
+  public static invokeAction(
+    extensionUri: vscode.Uri,
+    modelManager: ModelManager,
+    message: string
+  ): void {
+    ChatPanel.createOrShow(extensionUri, modelManager);
+    // Give the webview a moment to be ready, then send
+    setTimeout(() => {
+      ChatPanel.currentPanel?.panel.webview.postMessage({
+        type: "sendImmediate",
+        text: message,
+      });
+    }, 350);
+  }
+
   private async handleMessage(message: {
     type: string;
     text?: string;
@@ -589,9 +605,15 @@ export class ChatPanel {
           break;
 
         case 'insertText':
-          inputEl.value += (inputEl.value ? '\\n' : '') + msg.text;
+          inputEl.value += (inputEl.value ? '\n' : '') + msg.text;
           autoResize();
           inputEl.focus();
+          break;
+
+        case 'sendImmediate':
+          inputEl.value = msg.text;
+          autoResize();
+          sendMessage();
           break;
       }
     });

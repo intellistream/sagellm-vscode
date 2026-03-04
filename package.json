@@ -2,7 +2,7 @@
   "name": "sagellm-vscode",
   "displayName": "SageLLM",
   "description": "SageLLM inference engine integration for VS Code — chat, code completion, and model management via sagellm-gateway",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "publisher": "intellistream",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -76,6 +76,26 @@
         "command": "sagellm.checkConnection",
         "title": "SageLLM: Check Connection",
         "icon": "$(plug)"
+      },
+      {
+        "command": "sagellm.explainCode",
+        "title": "SageLLM: Explain Code",
+        "icon": "$(question)"
+      },
+      {
+        "command": "sagellm.generateTests",
+        "title": "SageLLM: Generate Tests",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "sagellm.fixCode",
+        "title": "SageLLM: Fix Code",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "sagellm.generateDocstring",
+        "title": "SageLLM: Generate Docstring",
+        "icon": "$(book)"
       }
     ],
     "viewsContainers": {
@@ -108,6 +128,26 @@
           "command": "sagellm.openChat",
           "when": "editorHasSelection",
           "group": "sagellm@1"
+        },
+        {
+          "command": "sagellm.explainCode",
+          "when": "editorHasSelection",
+          "group": "sagellm@2"
+        },
+        {
+          "command": "sagellm.generateTests",
+          "when": "editorHasSelection",
+          "group": "sagellm@3"
+        },
+        {
+          "command": "sagellm.fixCode",
+          "when": "editorHasSelection",
+          "group": "sagellm@4"
+        },
+        {
+          "command": "sagellm.generateDocstring",
+          "when": "editorHasSelection",
+          "group": "sagellm@5"
         }
       ],
       "view/title": [
@@ -186,8 +226,35 @@
         },
         "sagellm.inlineCompletion.triggerDelay": {
           "type": "number",
-          "default": 400,
-          "description": "Milliseconds to wait before triggering inline completion"
+          "default": 350,
+          "description": "Milliseconds to wait after typing stops before triggering inline completion"
+        },
+        "sagellm.inlineCompletion.maxTokens": {
+          "type": "number",
+          "default": 150,
+          "description": "Maximum tokens for each inline completion"
+        },
+        "sagellm.inlineCompletion.temperature": {
+          "type": "number",
+          "default": 0.05,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Temperature for inline completion (lower = more deterministic)"
+        },
+        "sagellm.inlineCompletion.contextLines": {
+          "type": "number",
+          "default": 80,
+          "description": "Lines of code above cursor to include as context"
+        },
+        "sagellm.inlineCompletion.useTabContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include snippets from other open files as completion context"
+        },
+        "sagellm.inlineCompletion.tabContextChars": {
+          "type": "number",
+          "default": 2000,
+          "description": "Max characters to collect from other open tabs as context"
         },
         "sagellm.chat.systemPrompt": {
           "type": "string",

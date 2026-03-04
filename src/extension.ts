@@ -89,6 +89,72 @@ export async function activate(
       showInstallGuide(context.extensionUri);
     }),
 
+    // ── Code action commands (right-click menu) ──────────────────────────
+    vscode.commands.registerCommand("sagellm.explainCode", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+      const selection = editor.document.getText(editor.selection);
+      if (!selection.trim()) {
+        vscode.window.showWarningMessage("SageLLM: Select some code first.");
+        return;
+      }
+      const lang = editor.document.languageId;
+      const rel = vscode.workspace.asRelativePath(editor.document.uri);
+      ChatPanel.invokeAction(
+        context.extensionUri,
+        modelManager,
+        `Explain this ${lang} code from \`${rel}\`:\n\n\`\`\`${lang}\n${selection}\n\`\`\``
+      );
+    }),
+
+    vscode.commands.registerCommand("sagellm.generateTests", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+      const selection = editor.document.getText(editor.selection);
+      if (!selection.trim()) {
+        vscode.window.showWarningMessage("SageLLM: Select a function or class first.");
+        return;
+      }
+      const lang = editor.document.languageId;
+      ChatPanel.invokeAction(
+        context.extensionUri,
+        modelManager,
+        `Write comprehensive unit tests for this ${lang} code. Cover edge cases.\n\n\`\`\`${lang}\n${selection}\n\`\`\``
+      );
+    }),
+
+    vscode.commands.registerCommand("sagellm.fixCode", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+      const selection = editor.document.getText(editor.selection);
+      if (!selection.trim()) {
+        vscode.window.showWarningMessage("SageLLM: Select the code to fix.");
+        return;
+      }
+      const lang = editor.document.languageId;
+      ChatPanel.invokeAction(
+        context.extensionUri,
+        modelManager,
+        `Find bugs and fix this ${lang} code. Show the corrected version with a brief explanation of each fix.\n\n\`\`\`${lang}\n${selection}\n\`\`\``
+      );
+    }),
+
+    vscode.commands.registerCommand("sagellm.generateDocstring", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+      const selection = editor.document.getText(editor.selection);
+      if (!selection.trim()) {
+        vscode.window.showWarningMessage("SageLLM: Select a function or class.");
+        return;
+      }
+      const lang = editor.document.languageId;
+      ChatPanel.invokeAction(
+        context.extensionUri,
+        modelManager,
+        `Write a docstring/JSDoc comment for this ${lang} code. Follow the language's standard documentation style.\n\n\`\`\`${lang}\n${selection}\n\`\`\``
+      );
+    }),
+
     vscode.commands.registerCommand("sagellm.checkConnection", async () => {
       statusBar?.setConnecting();
       const healthy = await checkHealth();
