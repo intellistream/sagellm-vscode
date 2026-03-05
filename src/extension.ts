@@ -96,6 +96,23 @@ export async function activate(
       stopGateway(statusBar!)
     ),
 
+    vscode.commands.registerCommand("sagellm.restartGateway", () => {
+      // Close any existing SageLLM terminals to avoid duplicates
+      for (const term of vscode.window.terminals) {
+        if (term.name.startsWith("SageLLM")) {
+          term.dispose();
+        }
+      }
+      const cfg = vscode.workspace.getConfiguration("sagellm");
+      const preloadModel = cfg.get<string>("preloadModel", "").trim();
+      const backend = cfg.get<string>("backend", "").trim();
+      if (preloadModel && backend) {
+        startGateway(statusBar);
+      } else {
+        promptAndStartServer(context, statusBar);
+      }
+    }),
+
     vscode.commands.registerCommand("sagellm.showInstallGuide", () => {
       showInstallGuide(context.extensionUri);
     }),

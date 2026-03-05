@@ -353,6 +353,9 @@ export class ChatPanel {
       case "showInstallGuide":
         vscode.commands.executeCommand("sagellm.showInstallGuide");
         break;
+      case "restartGateway":
+        vscode.commands.executeCommand("sagellm.restartGateway");
+        break;
     }
   }
 
@@ -597,6 +600,7 @@ export class ChatPanel {
     <h1>SageLLM</h1>
     <div id="model-badge" title="Click to switch model">No model</div>
     <button class="icon-btn" id="clear-btn" title="Clear conversation">🗑</button>
+    <button class="icon-btn" id="restart-btn" title="Restart gateway (uses saved settings)">🔄</button>
     <button class="icon-btn" id="check-btn" title="Check connection">⚡</button>
   </div>
 
@@ -611,6 +615,7 @@ export class ChatPanel {
   <div id="input-area">
     <div class="not-connected-banner" id="not-connected">
       ⚠️ sagellm-gateway not reachable.
+      <a id="start-gateway-link">Start gateway</a> ·
       <a id="install-link">Installation guide</a> ·
       <a id="retry-link">Retry</a>
     </div>
@@ -635,6 +640,7 @@ export class ChatPanel {
     const abortBtn = document.getElementById('abort-btn');
     const clearBtn = document.getElementById('clear-btn');
     const checkBtn = document.getElementById('check-btn');
+    const restartBtn = document.getElementById('restart-btn');
     const modelBadge = document.getElementById('model-badge');
     const statusDot = document.getElementById('status-dot');
     const notConnected = document.getElementById('not-connected');
@@ -755,6 +761,8 @@ export class ChatPanel {
     modelBadge.addEventListener('click', () => vscode.postMessage({ type: 'selectModel' }));
     document.getElementById('retry-link').addEventListener('click', () => vscode.postMessage({ type: 'checkConnection' }));
     document.getElementById('install-link').addEventListener('click', () => vscode.postMessage({ type: 'showInstallGuide' }));
+    restartBtn.addEventListener('click', () => vscode.postMessage({ type: 'restartGateway' }));
+    document.getElementById('start-gateway-link').addEventListener('click', () => vscode.postMessage({ type: 'restartGateway' }));
 
     window.addEventListener('message', (event) => {
       const msg = event.data;
@@ -1032,6 +1040,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case "showInstallGuide":
         vscode.commands.executeCommand("sagellm.showInstallGuide");
         break;
+      case "restartGateway":
+        vscode.commands.executeCommand("sagellm.restartGateway");
+        break;
     }
   }
 
@@ -1151,6 +1162,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <h1>SageLLM</h1>
     <div id="model-badge" title="Click to switch model">No model</div>
     <button class="icon-btn" id="clear-btn" title="Clear conversation">🗑</button>
+    <button class="icon-btn" id="restart-btn" title="Restart gateway (uses saved settings)">🔄</button>
     <button class="icon-btn" id="check-btn" title="Check connection">⚡</button>
   </div>
   <div id="messages">
@@ -1163,6 +1175,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="input-area">
     <div class="not-connected-banner" id="not-connected">
       ⚠️ sagellm-gateway not reachable.
+      <a id="start-gateway-link">Start gateway</a> ·
       <a id="install-link">Installation guide</a> ·
       <a id="retry-link">Retry</a>
     </div>
@@ -1181,6 +1194,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const abortBtn = document.getElementById('abort-btn');
     const clearBtn = document.getElementById('clear-btn');
     const checkBtn = document.getElementById('check-btn');
+    const restartBtn = document.getElementById('restart-btn');
     const modelBadge = document.getElementById('model-badge');
     const statusDot = document.getElementById('status-dot');
     const notConnected = document.getElementById('not-connected');
@@ -1227,6 +1241,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     modelBadge.addEventListener('click', () => vscode.postMessage({ type: 'selectModel' }));
     document.getElementById('retry-link').addEventListener('click', () => vscode.postMessage({ type: 'checkConnection' }));
     document.getElementById('install-link').addEventListener('click', () => vscode.postMessage({ type: 'showInstallGuide' }));
+    restartBtn.addEventListener('click', () => vscode.postMessage({ type: 'restartGateway' }));
+    document.getElementById('start-gateway-link').addEventListener('click', () => vscode.postMessage({ type: 'restartGateway' }));
     window.addEventListener('message', (event) => {
       const msg = event.data;
       switch (msg.type) {

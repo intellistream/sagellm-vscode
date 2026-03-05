@@ -2,7 +2,7 @@
   "name": "sagellm-vscode",
   "displayName": "SageLLM",
   "description": "SageLLM inference engine integration for VS Code — chat, code completion, and model management via sagellm-gateway",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "publisher": "intellistream",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -61,6 +61,11 @@
         "command": "sagellm.stopGateway",
         "title": "SageLLM: Stop Gateway",
         "icon": "$(stop)"
+      },
+      {
+        "command": "sagellm.restartGateway",
+        "title": "SageLLM: Restart Gateway",
+        "icon": "$(debug-restart)"
       },
       {
         "command": "sagellm.showInstallGuide",
