@@ -96,14 +96,26 @@ export async function activate(
       stopGateway(statusBar!)
     ),
 
-    vscode.commands.registerCommand("sagellm.restartGateway", () => {
+    vscode.commands.registerCommand("sagellm.restartGateway", async () => {
       // Close any existing SageLLM terminals to avoid duplicates
       for (const term of vscode.window.terminals) {
         if (term.name.startsWith("SageLLM")) {
           term.dispose();
         }
       }
+      // Kill any process holding the gateway port to prevent "Address already in use"
       const cfg = vscode.workspace.getConfiguration("sagellm");
+      const port = cfg.get<number>("gateway.port", DEFAULT_GATEWAY_PORT);
+      try {
+        cp.execSync(`fuser -k ${port}/tcp 2>/dev/null; true`, { stdio: "ignore" });
+      } catch {
+        try {
+          cp.execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null; true`, { stdio: "ignore" });
+        } catch { /* ignore */ }
+      }
+      // Give OS a moment to release the port
+      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+
       const preloadModel = cfg.get<string>("preloadModel", "").trim();
       const backend = cfg.get<string>("backend", "").trim();
       if (preloadModel && backend) {

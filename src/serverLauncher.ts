@@ -23,7 +23,7 @@ interface CatalogModel {
   desc: string;     // one-line description
 }
 
-const MODEL_CATALOG: CatalogModel[] = [
+export const MODEL_CATALOG: CatalogModel[] = [
   // ── Tiny / CPU-friendly ──────────────────────────────────────────────────
   { id: "Qwen/Qwen2.5-0.5B-Instruct",              size: "0.5B", vram: "~1 GB",  tags: ["chat","cpu-ok","fast"],   desc: "Tiny Qwen chat, runs on CPU" },
   { id: "Qwen/Qwen2.5-Coder-0.5B-Instruct",        size: "0.5B", vram: "~1 GB",  tags: ["code","cpu-ok","fast"],   desc: "Tiny code assistant" },

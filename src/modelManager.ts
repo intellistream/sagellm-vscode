@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
 import { fetchModels, ModelInfo, GatewayConnectionError } from "./gatewayClient";
+import { MODEL_CATALOG, isModelDownloaded } from "./serverLauncher";
+
+const SEP = vscode.QuickPickItemKind.Separator;
 
 export class ModelManager {
   private models: ModelInfo[] = [];
@@ -35,41 +38,104 @@ export class ModelManager {
   }
 
   async selectModelInteractive(): Promise<string | undefined> {
-    let models = this.models;
-    if (models.length === 0) {
-      try {
-        models = await this.refresh();
-      } catch {
-        vscode.window.showErrorMessage(
-          "Cannot reach sagellm-gateway. Is it running? Run 'SageLLM: Start Gateway' or check your settings."
-        );
-        return undefined;
+    // Fetch currently loaded gateway models (best-effort)
+    let loadedModels: ModelInfo[] = [];
+    try {
+      loadedModels = await this.refresh();
+    } catch { /* gateway offline */ }
+    const loadedIds = new Set(loadedModels.map((m) => m.id));
+
+    const items: vscode.QuickPickItem[] = [];
+
+    // ── 1. Running in gateway ────────────────────────────────────────────
+    if (loadedModels.length > 0) {
+      items.push({ label: "Running in gateway", kind: SEP });
+      for (const m of loadedModels) {
+        items.push({
+          label: `$(check) ${m.id}`,
+          description: "● active",
+          detail: m.id,
+        });
       }
     }
 
-    if (models.length === 0) {
-      vscode.window.showWarningMessage(
-        "No models available on the gateway. Please load a model first."
-      );
-      return undefined;
+    // ── 2. Downloaded locally (catalog) ─────────────────────────────────
+    const downloadedLocal = MODEL_CATALOG.filter(
+      (m) => isModelDownloaded(m.id) && !loadedIds.has(m.id)
+    );
+    if (downloadedLocal.length > 0) {
+      items.push({ label: "Downloaded — restart gateway to load", kind: SEP });
+      for (const m of downloadedLocal) {
+        items.push({
+          label: `$(package) ${m.id}`,
+          description: `${m.size} · ${m.vram}`,
+          detail: m.id,
+        });
+      }
     }
 
-    const items: vscode.QuickPickItem[] = models.map((m) => ({
-      label: m.id,
-      description: m.owned_by,
-      detail: `Object: ${m.object}`,
-    }));
+    // ── 3. Available to download ─────────────────────────────────────────
+    const downloadable = MODEL_CATALOG.filter(
+      (m) => !isModelDownloaded(m.id) && !loadedIds.has(m.id)
+    );
+    if (downloadable.length > 0) {
+      items.push({ label: "Available to download", kind: SEP });
+      for (const m of downloadable) {
+        items.push({
+          label: `$(cloud-download) ${m.id}`,
+          description: `${m.size} · ${m.vram} · ${m.desc}`,
+          detail: m.id,
+        });
+      }
+    }
 
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: "Select a SageLLM model",
-      title: "SageLLM: Available Models",
+    // ── 4. Custom entry ──────────────────────────────────────────────────
+    items.push({ label: "", kind: SEP });
+    items.push({
+      label: "$(edit) Enter model path / HuggingFace ID…",
+      description: "",
+      detail: "__custom__",
     });
 
-    if (picked) {
-      await this.setModel(picked.label);
-      return picked.label;
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: "$(check) active  $(package) local  $(cloud-download) downloadable",
+      title: "SageLLM: Select Model",
+      matchOnDescription: true,
+    });
+
+    if (!picked || picked.kind === SEP) return undefined;
+
+    let modelId = picked.detail ?? "";
+    if (modelId === "__custom__") {
+      modelId =
+        (await vscode.window.showInputBox({
+          title: "SageLLM: Model Path or HuggingFace ID",
+          prompt: "e.g.  Qwen/Qwen2.5-7B-Instruct  or  /models/my-model",
+          value: this.selectedModel,
+          ignoreFocusOut: true,
+        })) ?? "";
+      if (!modelId.trim()) return undefined;
+      modelId = modelId.trim();
     }
-    return undefined;
+
+    await this.setModel(modelId);
+
+    // If not already loaded in the gateway → offer to restart
+    if (!loadedIds.has(modelId)) {
+      await vscode.workspace
+        .getConfiguration("sagellm")
+        .update("preloadModel", modelId, vscode.ConfigurationTarget.Global);
+      const choice = await vscode.window.showInformationMessage(
+        `"${modelId}" is not currently loaded. Restart gateway to use it?`,
+        "Restart Gateway",
+        "Later"
+      );
+      if (choice === "Restart Gateway") {
+        vscode.commands.executeCommand("sagellm.restartGateway");
+      }
+    }
+
+    return modelId;
   }
 
   async setModel(modelId: string): Promise<void> {
