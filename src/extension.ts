@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as cp from "child_process";
 import { ModelManager, ModelsTreeProvider } from "./modelManager";
-import { ChatPanel } from "./chatPanel";
+import { ChatPanel, ChatViewProvider } from "./chatPanel";
 import { SageLLMInlineCompletionProvider } from "./inlineCompletion";
 import { StatusBarManager } from "./statusBar";
 import { checkHealth, GatewayConnectionError } from "./gatewayClient";
@@ -19,6 +19,16 @@ export async function activate(
   const modelManager = new ModelManager(context);
   statusBar = new StatusBarManager();
   context.subscriptions.push(statusBar);
+
+  // ── Sidebar chat view (sagellm.chatView) ─────────────────────────────────
+  const chatViewProvider = new ChatViewProvider(context.extensionUri, modelManager);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      ChatViewProvider.viewType,
+      chatViewProvider,
+      { webviewOptions: { retainContextWhenHidden: true } }
+    )
+  );
 
   // ── Tree view: Models sidebar ──────────────────────────────────────────────
   const modelsProvider = new ModelsTreeProvider(modelManager);
@@ -235,6 +245,7 @@ export async function activate(
     const healthy = await checkHealth();
     statusBar?.setGatewayStatus(healthy);
     if (healthy) {
+      let modelLoaded = false;
       try {
         const models = await modelManager.refresh();
         modelsProvider.refresh();
@@ -243,12 +254,19 @@ export async function activate(
           const toSelect = modelManager.currentModel || models[0].id;
           const valid = models.find(m => m.id === toSelect);
           await modelManager.setModel(valid ? valid.id : models[0].id);
+          modelLoaded = true;
         }
         statusBar?.setModel(modelManager.currentModel);
+        // Notify any open chat panel so its model badge updates immediately
+        if (modelManager.currentModel) {
+          ChatPanel.notifyModelChanged(modelManager.currentModel);
+        }
       } catch {
         // gateway healthy but model fetch failed — non-fatal
       }
-      return true;
+      // Return false when gateway is up but model list empty (still loading)
+      // so the caller retries later.
+      return modelLoaded;
     } else {
       if (showWarning) {
         const choice = await vscode.window.showWarningMessage(
@@ -264,13 +282,23 @@ export async function activate(
     }
   }
 
-  // Try at 2s; if gateway not yet ready, retry once at 6s
-  setTimeout(async () => {
-    const ok = await tryConnectAndRestoreModel(false);
-    if (!ok) {
-      setTimeout(() => tryConnectAndRestoreModel(true), 4000);
-    }
-  }, 2000);
+  // Try at 2s; if not ready (gateway down or model not yet loaded), keep
+  // retrying with increasing delays until a model is available or we give up.
+  let retryAttempt = 0;
+  const maxRetries = 10; // up to ~5 min total
+  async function scheduleRetryConnect(): Promise<void> {
+    retryAttempt++;
+    if (retryAttempt > maxRetries) return;
+    const delay = Math.min(2000 * retryAttempt, 30_000); // 2s, 4s, 6s … 30s
+    setTimeout(async () => {
+      const showWarning = retryAttempt >= 3;
+      const ok = await tryConnectAndRestoreModel(showWarning);
+      if (!ok) {
+        scheduleRetryConnect();
+      }
+    }, delay);
+  }
+  scheduleRetryConnect();
 }
 
 export function deactivate(): void {
