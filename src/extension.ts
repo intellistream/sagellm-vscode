@@ -302,6 +302,11 @@ function startGateway(sb: StatusBarManager | null): void {
   const terminal = vscode.window.createTerminal({
     name: "SageLLM Gateway",
     isTransient: false,
+    // Disable preflight canary — it loads the model twice before the engine starts,
+    // causing OOM on low-memory machines and extending startup by 2–10 minutes.
+    // The extension's own health-poll + startup canary (SAGELLM_STARTUP_CANARY)
+    // still verifies model output quality after the engine is healthy.
+    env: { SAGELLM_PREFLIGHT_CANARY: "0" },
   });
   terminal.sendText(cmd);
   terminal.show(false);
@@ -311,9 +316,9 @@ function startGateway(sb: StatusBarManager | null): void {
     `SageLLM: Starting gateway with "${cmd}"…`
   );
 
-  // Poll until healthy (up to 60s)
+  // Poll until healthy (up to 5 min — model loading + engine startup can be slow)
   let attempts = 0;
-  const maxAttempts = 20;
+  const maxAttempts = 100; // 100 × 3s = 5 minutes
   const poll = setInterval(async () => {
     attempts++;
     const healthy = await checkHealth();
@@ -325,8 +330,13 @@ function startGateway(sb: StatusBarManager | null): void {
       clearInterval(poll);
       sb?.setError("Gateway start timed out");
       vscode.window.showWarningMessage(
-        "SageLLM: Gateway did not respond within 60s. Check the terminal for errors."
+        "SageLLM: Gateway did not respond within 5 minutes. Check the terminal for errors."
       );
+    } else if (attempts % 20 === 0) {
+      // Show elapsed time every minute so user knows it's still loading
+      const elapsed = Math.round(attempts * 3 / 60);
+      sb?.setConnecting();
+      vscode.window.setStatusBarMessage(`SageLLM: Loading model… (${elapsed} min elapsed)`, 5000);
     }
   }, 3000);
 }
@@ -422,14 +432,17 @@ pip install -e .[dev]</code></pre>
     </div>
   </div>
 
-  <h2>Start the Gateway</h2>
+  <h2>Start the Server</h2>
   <div class="step">
     <div class="step-num">3</div>
     <div>
-      Start the OpenAI-compatible inference gateway:
-      <pre><code>sagellm gateway start --host 0.0.0.0 --port 8000</code></pre>
-      Or with a specific model:
-      <pre><code>sagellm gateway start --model &lt;model-name&gt; --port 8000</code></pre>
+      Start the full inference stack (gateway + engine, OpenAI-compatible API):
+      <pre><code>sagellm serve</code></pre>
+      With a specific model and backend:
+      <pre><code>sagellm serve --backend cpu --model Qwen/Qwen2.5-1.5B-Instruct</code></pre>
+      On GPU (CUDA):
+      <pre><code>sagellm serve --backend cuda --model Qwen/Qwen2.5-7B-Instruct</code></pre>
+      <div class="note">💡 Tip: Add <code>SAGELLM_PREFLIGHT_CANARY=0</code> to skip the pre-validation step for faster first startup.</div>
     </div>
   </div>
 
@@ -440,7 +453,7 @@ pip install -e .[dev]</code></pre>
       Open VS Code Settings (<code>Ctrl+,</code>) and search for <strong>SageLLM</strong>:
       <ul style="margin: 8px 0 0 16px;">
         <li><code>sagellm.gateway.host</code> — default: <code>localhost</code></li>
-        <li><code>sagellm.gateway.port</code> — default: <code>8000</code></li>
+        <li><code>sagellm.gateway.port</code> — default: <code>8901</code> (<code>sagellm serve</code> default)</li>
         <li><code>sagellm.gateway.apiKey</code> — if your gateway requires auth</li>
       </ul>
     </div>
@@ -455,8 +468,9 @@ pip install -e .[dev]</code></pre>
   </div>
 
   <div class="note">
-    ℹ️ The extension auto-starts <code>sagellm gateway start</code> when you enable
-    <code>sagellm.autoStartGateway</code> in settings.
+    ℹ️ The extension auto-starts <code>sagellm serve</code> when you enable
+    <code>sagellm.autoStartGateway</code> in settings. Model loading may take
+    several minutes — the extension polls for up to 5 minutes.
   </div>
 
   <h2>Resources</h2>

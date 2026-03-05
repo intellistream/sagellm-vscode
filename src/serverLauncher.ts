@@ -386,23 +386,36 @@ export async function promptAndStartServer(
   // ── 5. Launch server ──────────────────────────────────────────────────────
   const baseCmd = cfg.get<string>("gatewayStartCommand", "sagellm serve");
   const cmd     = `${baseCmd} --backend ${backendId} --model ${modelId} --port ${port}`;
-  const terminal = vscode.window.createTerminal({ name: "SageLLM Server", isTransient: false });
+  const terminal = vscode.window.createTerminal({
+    name: "SageLLM Server",
+    isTransient: false,
+    // Disable preflight canary — it loads the model via `transformers` BEFORE the
+    // engine starts, doubling memory usage and adding 2–10 min to startup time.
+    // The engine's own startup canary (SAGELLM_STARTUP_CANARY) still validates
+    // output quality after the engine is healthy.
+    env: { SAGELLM_PREFLIGHT_CANARY: "0" },
+  });
   terminal.sendText(cmd);
   terminal.show(false);
   vscode.window.showInformationMessage(`SageLLM: Starting ${backendId.toUpperCase()} · ${modelId}…`);
 
-  // ── 6. Poll until healthy ─────────────────────────────────────────────────
+  // ── 6. Poll until healthy (up to 5 min — model loading can be slow) ───────
   let attempts = 0;
+  const maxPollAttempts = 100; // 100 × 3s = 5 minutes
   const poll = setInterval(async () => {
     attempts++;
     if (await checkHealth()) {
       clearInterval(poll);
       sb?.setGatewayStatus(true);
       vscode.window.showInformationMessage(`SageLLM: Server ready ✓  (${backendId} · ${modelId})`);
-    } else if (attempts >= 20) {
+    } else if (attempts >= maxPollAttempts) {
       clearInterval(poll);
       sb?.setError("Server start timed out");
-      vscode.window.showWarningMessage("SageLLM: Server did not respond within 60s. Check the terminal.");
+      vscode.window.showWarningMessage("SageLLM: Server did not respond within 5 minutes. Check the terminal.");
+    } else if (attempts % 20 === 0) {
+      // Notify user every minute so they know it's still loading
+      const elapsed = Math.round(attempts * 3 / 60);
+      vscode.window.setStatusBarMessage(`SageLLM: Loading model… (${elapsed} min elapsed)`, 5000);
     }
   }, 3000);
 }
