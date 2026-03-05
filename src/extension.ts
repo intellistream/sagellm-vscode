@@ -203,8 +203,13 @@ export async function activate(
         }
       });
     } else {
-      // First time or not yet configured: show picker after short delay
-      setTimeout(() => promptAndStartServer(context, statusBar), 1500);
+      // Not yet configured: only show picker if gateway is NOT already running
+      checkHealth().then((alreadyRunning) => {
+        if (!alreadyRunning) {
+          setTimeout(() => promptAndStartServer(context, statusBar), 1500);
+        }
+        // If already running, the initial connection check (below) handles model restore
+      });
     }
   }
 
