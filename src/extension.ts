@@ -230,30 +230,44 @@ export async function activate(
   });
 
   // ── Initial connection check ───────────────────────────────────────────────
-  setTimeout(async () => {
+  async function tryConnectAndRestoreModel(showWarning: boolean): Promise<boolean> {
     const healthy = await checkHealth();
     statusBar?.setGatewayStatus(healthy);
     if (healthy) {
       try {
         const models = await modelManager.refresh();
         modelsProvider.refresh();
-        // Auto-restore: if no model selected but gateway has models, pick the first one
-        if (!modelManager.currentModel && models.length > 0) {
-          await modelManager.setModel(models[0].id);
+        // Always pick a model from gateway — don't rely on persisted state
+        if (models.length > 0) {
+          const toSelect = modelManager.currentModel || models[0].id;
+          const valid = models.find(m => m.id === toSelect);
+          await modelManager.setModel(valid ? valid.id : models[0].id);
         }
         statusBar?.setModel(modelManager.currentModel);
       } catch {
         // gateway healthy but model fetch failed — non-fatal
       }
+      return true;
     } else {
-      const choice = await vscode.window.showWarningMessage(
-        "SageLLM: Gateway not reachable. Configure and start now?",
-        "Configure Server",
-        "Dismiss"
-      );
-      if (choice === "Configure Server") {
-        vscode.commands.executeCommand("sagellm.configureServer");
+      if (showWarning) {
+        const choice = await vscode.window.showWarningMessage(
+          "SageLLM: Gateway not reachable. Configure and start now?",
+          "Configure Server",
+          "Dismiss"
+        );
+        if (choice === "Configure Server") {
+          vscode.commands.executeCommand("sagellm.configureServer");
+        }
       }
+      return false;
+    }
+  }
+
+  // Try at 2s; if gateway not yet ready, retry once at 6s
+  setTimeout(async () => {
+    const ok = await tryConnectAndRestoreModel(false);
+    if (!ok) {
+      setTimeout(() => tryConnectAndRestoreModel(true), 4000);
     }
   }, 2000);
 }
