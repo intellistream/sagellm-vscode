@@ -51,7 +51,7 @@ export class GatewayConnectionError extends Error {
 function getConfig() {
   const cfg = vscode.workspace.getConfiguration("sagellm");
   const host = cfg.get<string>("gateway.host", "localhost");
-  const port = cfg.get<number>("gateway.port", 8000);
+  const port = cfg.get<number>("gateway.port", 8901);
   const apiKey = cfg.get<string>("gateway.apiKey", "");
   const tls = cfg.get<boolean>("gateway.tls", false);
   const baseUrl = `${tls ? "https" : "http"}://${host}:${port}`;
