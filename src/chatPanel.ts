@@ -151,6 +151,7 @@ export class ChatPanel {
   private history: ChatMessage[] = [];
   private abortController: AbortController | null = null;
   private disposables: vscode.Disposable[] = [];
+  private lastActiveEditor: vscode.TextEditor | undefined;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -167,6 +168,31 @@ export class ChatPanel {
       null,
       this.disposables
     );
+    // Track the last focused text editor so applyCode works even when the
+    // webview panel has keyboard focus.
+    vscode.window.onDidChangeActiveTextEditor(
+      (editor) => { if (editor) this.lastActiveEditor = editor; },
+      null, this.disposables
+    );
+    this.lastActiveEditor = vscode.window.activeTextEditor;
+    // Keep model badge in sync when model changes externally (e.g. sidebar).
+    modelManager.onDidChangeModels(() => {
+      const m = modelManager.currentModel;
+      if (m) this.panel.webview.postMessage({ type: "modelChanged", model: m });
+    });
+    // Re-send model info whenever the panel becomes visible (e.g. after reveal).
+    this.panel.onDidChangeViewState(
+      ({ webviewPanel }) => {
+        if (webviewPanel.visible) {
+          this.panel.webview.postMessage({
+            type: "connectionStatus",
+            connected: true,
+            model: this.modelManager.currentModel,
+          });
+        }
+      },
+      null, this.disposables
+    );
     this.initChat();
   }
 
@@ -181,6 +207,13 @@ export class ChatPanel {
 
     if (ChatPanel.currentPanel) {
       ChatPanel.currentPanel.panel.reveal(column);
+      // Send fresh model/connection state so a previously-opened panel
+      // that has been hidden never shows a stale "No model" badge.
+      ChatPanel.currentPanel.panel.webview.postMessage({
+        type: "connectionStatus",
+        connected: true,
+        model: ChatPanel.currentPanel.modelManager.currentModel,
+      });
       if (selectedText) {
         ChatPanel.currentPanel.sendSelectedText(selectedText);
       }
@@ -358,7 +391,9 @@ export class ChatPanel {
         break;
       case "applyCode": {
         const code = (message as { code?: string }).code ?? "";
-        const editor = vscode.window.activeTextEditor;
+        // Prefer the last known editor — clicking the webview button
+        // steals focus so activeTextEditor may be undefined at this point.
+        const editor = vscode.window.activeTextEditor ?? this.lastActiveEditor;
         if (editor) {
           await editor.edit((eb) => {
             if (!editor.selection.isEmpty) {
@@ -1013,6 +1048,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private history: ChatMessage[] = [];
   private abortController: AbortController | null = null;
+  private lastActiveEditor: vscode.TextEditor | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -1050,6 +1086,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this._getHtml();
 
     webviewView.webview.onDidReceiveMessage((msg) => this._handleMessage(msg));
+
+    // Track the last focused text editor so applyCode works even when
+    // the sidebar webview has keyboard/click focus.
+    this.lastActiveEditor = vscode.window.activeTextEditor;
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        this.lastActiveEditor = vscode.window.activeTextEditor ?? this.lastActiveEditor;
+      }
+    });
+    const editorSub = vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor) this.lastActiveEditor = editor;
+    });
+    // Dispose the subscription when the view is disposed
+    webviewView.onDidDispose(() => editorSub.dispose());
 
     this._initChat();
   }
@@ -1161,7 +1211,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       case "applyCode": {
         const code = (message as { code?: string }).code ?? "";
-        const editor = vscode.window.activeTextEditor;
+        // Clicking the webview button steals focus; fall back to the last
+        // tracked text editor so Apply always works from the sidebar.
+        const editor = vscode.window.activeTextEditor ?? this.lastActiveEditor;
         if (editor) {
           await editor.edit((eb) => {
             if (!editor.selection.isEmpty) {

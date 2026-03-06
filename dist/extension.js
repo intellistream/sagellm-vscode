@@ -2057,6 +2057,33 @@ var ChatPanel = class _ChatPanel {
       null,
       this.disposables
     );
+    vscode6.window.onDidChangeActiveTextEditor(
+      (editor) => {
+        if (editor)
+          this.lastActiveEditor = editor;
+      },
+      null,
+      this.disposables
+    );
+    this.lastActiveEditor = vscode6.window.activeTextEditor;
+    modelManager.onDidChangeModels(() => {
+      const m = modelManager.currentModel;
+      if (m)
+        this.panel.webview.postMessage({ type: "modelChanged", model: m });
+    });
+    this.panel.onDidChangeViewState(
+      ({ webviewPanel }) => {
+        if (webviewPanel.visible) {
+          this.panel.webview.postMessage({
+            type: "connectionStatus",
+            connected: true,
+            model: this.modelManager.currentModel
+          });
+        }
+      },
+      null,
+      this.disposables
+    );
     this.initChat();
   }
   static currentPanel;
@@ -2066,10 +2093,16 @@ var ChatPanel = class _ChatPanel {
   history = [];
   abortController = null;
   disposables = [];
+  lastActiveEditor;
   static createOrShow(extensionUri, modelManager, selectedText) {
     const column = vscode6.window.activeTextEditor ? vscode6.ViewColumn.Beside : vscode6.ViewColumn.One;
     if (_ChatPanel.currentPanel) {
       _ChatPanel.currentPanel.panel.reveal(column);
+      _ChatPanel.currentPanel.panel.webview.postMessage({
+        type: "connectionStatus",
+        connected: true,
+        model: _ChatPanel.currentPanel.modelManager.currentModel
+      });
       if (selectedText) {
         _ChatPanel.currentPanel.sendSelectedText(selectedText);
       }
@@ -2214,7 +2247,7 @@ var ChatPanel = class _ChatPanel {
         break;
       case "applyCode": {
         const code = message.code ?? "";
-        const editor = vscode6.window.activeTextEditor;
+        const editor = vscode6.window.activeTextEditor ?? this.lastActiveEditor;
         if (editor) {
           await editor.edit((eb) => {
             if (!editor.selection.isEmpty) {
@@ -2879,6 +2912,7 @@ var ChatViewProvider = class _ChatViewProvider {
   _view;
   history = [];
   abortController = null;
+  lastActiveEditor;
   static notifyModelChanged(model) {
     _ChatViewProvider._instance?._view?.webview.postMessage({
       type: "modelChanged",
@@ -2893,6 +2927,17 @@ var ChatViewProvider = class _ChatViewProvider {
     };
     webviewView.webview.html = this._getHtml();
     webviewView.webview.onDidReceiveMessage((msg) => this._handleMessage(msg));
+    this.lastActiveEditor = vscode6.window.activeTextEditor;
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        this.lastActiveEditor = vscode6.window.activeTextEditor ?? this.lastActiveEditor;
+      }
+    });
+    const editorSub = vscode6.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor)
+        this.lastActiveEditor = editor;
+    });
+    webviewView.onDidDispose(() => editorSub.dispose());
     this._initChat();
   }
   async _initChat() {
@@ -3000,7 +3045,7 @@ var ChatViewProvider = class _ChatViewProvider {
         break;
       case "applyCode": {
         const code = message.code ?? "";
-        const editor = vscode6.window.activeTextEditor;
+        const editor = vscode6.window.activeTextEditor ?? this.lastActiveEditor;
         if (editor) {
           await editor.edit((eb) => {
             if (!editor.selection.isEmpty) {
