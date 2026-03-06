@@ -352,6 +352,12 @@
           "minimum": 0,
           "maximum": 2,
           "description": "Sampling temperature for chat (0 = deterministic, 2 = very creative)"
+        },
+        "sagellm.chat.maxContextTokens": {
+          "type": "number",
+          "default": 6000,
+          "minimum": 1000,
+          "description": "Maximum total tokens kept in chat history. Oldest turns are automatically pruned to stay within this budget, keeping the system prompt and the most recent 6 messages."
         }
       }
     }

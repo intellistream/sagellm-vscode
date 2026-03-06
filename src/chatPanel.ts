@@ -11,7 +11,10 @@ import {
   executeTool,
   buildActiveFileContext,
   resolveAtMentions,
+  trimHistoryToTokenBudget,
+  tokenBudgetLabel,
 } from "./workspaceContext";
+import { applyWithDiff } from "./diffEditor";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared tool-calling loop (used by both ChatPanel and ChatViewProvider)
@@ -54,6 +57,11 @@ async function runAgenticChat(
   }
 
   history.push({ role: "user", content: userContent });
+
+  // Auto-trim history to stay within the configured context token budget
+  const cfg = vscode.workspace.getConfiguration("sagellm");
+  const maxContextTokens = cfg.get<number>("chat.maxContextTokens", 6000);
+  trimHistoryToTokenBudget(history, maxContextTokens);
 
   // 3. Tool-calling loop
   const MAX_ROUNDS = 5;
@@ -99,8 +107,8 @@ async function runAgenticChat(
           name: tc.function.name,
           content: result,
         });
-      }
-      // Continue loop so LLM can process tool results
+      }      // Trim again after tool results are appended (tool responses can be large)
+      trimHistoryToTokenBudget(history, maxContextTokens);      // Continue loop so LLM can process tool results
       continue;
     }
 
@@ -249,17 +257,7 @@ class ChatCore {
         break;
       case "applyCode": {
         const code = message.code ?? "";
-        const editor = vscode.window.activeTextEditor ?? this.lastActiveEditor;
-        if (editor) {
-          await editor.edit((eb) => {
-            if (!editor.selection.isEmpty) { eb.replace(editor.selection, code); }
-            else { eb.insert(editor.selection.active, code); }
-          });
-          vscode.window.showInformationMessage("SageCoder: code applied to editor.");
-        } else {
-          const doc = await vscode.workspace.openTextDocument({ content: code });
-          await vscode.window.showTextDocument(doc);
-        }
+        await applyWithDiff(code, vscode.window.activeTextEditor ?? this.lastActiveEditor);
         break;
       }
       case "copyToClipboard":
@@ -280,7 +278,10 @@ class ChatCore {
           );
           const sys = this.history[0];
           this.history = [sys, { role: "assistant", content: `[Compressed history] ${summary.trim()}` }];
-          this.postMsg({ type: "compressed", summary: summary.trim() });
+          const cfg = vscode.workspace.getConfiguration("sagellm");
+          const maxCtx = cfg.get<number>("chat.maxContextTokens", 6000);
+          const budgetInfo = tokenBudgetLabel(this.history, maxCtx);
+          this.postMsg({ type: "compressed", summary: summary.trim(), budget: budgetInfo });
         } catch (err) {
           this.postMsg({ type: "error", text: `Compression failed: ${err instanceof Error ? err.message : String(err)}` });
         }
@@ -628,7 +629,7 @@ function buildHtml(compact: boolean): string {
         .replace(re3, function(_, lang, code) {
           var id = 'cb'+(cbIdx++);
           var ll = lang ? '<span class="code-lang">'+lang+'</span>' : '<span class="code-lang"></span>';
-          var btns = '<div class="code-btn-group"><button class="code-btn" onclick="copyCode('+SQ+id+SQ+')">Copy</button><button class="code-btn" onclick="applyCode('+SQ+id+SQ+')">Apply</button></div>';
+          var btns = '<div class="code-btn-group"><button class="code-btn" onclick="copyCode('+SQ+id+SQ+')">Copy</button><button class="code-btn apply-btn" title="Review changes in diff editor before applying" onclick="applyCode('+SQ+id+SQ+')">Review & Apply</button></div>';
           return '<div class="code-block-wrap"><div class="code-block-toolbar">'+ll+btns+'</div><pre id="'+id+'"><code>'+code+'</code></pre></div>';
         })
         .replace(re1,'<code>$1</code>').replace(/[*][*](.*?)[*][*]/g,'<strong>$1</strong>').replace(/[*](.*?)[*]/g,'<em>$1</em>');
@@ -682,7 +683,7 @@ function buildHtml(compact: boolean): string {
         case 'insertText': inputEl.value+=(inputEl.value?'\n':'')+msg.text; autoResize(); inputEl.focus(); break;
         case 'sendImmediate': inputEl.value=msg.text; autoResize(); sendMessage(); break;
         case 'compressStart': appendMessage('assistant','🗜 Compressing conversation history…'); break;
-        case 'compressed': appendMessage('assistant','✅ History compressed. '+(msg.summary||'Context is now shorter.')); break;
+        case 'compressed': appendMessage('assistant','✅ History compressed. '+(msg.summary||'Context is now shorter.')+(msg.budget ? '\n\n📊 '+msg.budget : '')); break;
       }
     });
     // Signal to the extension host that the webview JS is ready to receive messages.

@@ -16,6 +16,7 @@ import {
   runFullDiagnostics,
   showDiagnosticsPanel,
 } from "./diagnostics";
+import { diffContentProvider } from "./diffEditor";
 
 let activeGatewayTerminal: vscode.Terminal | null = null;
 let statusBar: StatusBarManager | null = null;
@@ -28,6 +29,14 @@ export async function activate(
   const modelManager = new ModelManager(context);
   statusBar = new StatusBarManager();
   context.subscriptions.push(statusBar);
+
+  // ── Diff content provider (sagellm-diff:// virtual docs for diff view) ────
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(
+      "sagellm-diff",
+      diffContentProvider
+    )
+  );
 
   // ── Sidebar chat view (sagellm.chatView) ─────────────────────────────────
   const chatViewProvider = new ChatViewProvider(context.extensionUri, modelManager);

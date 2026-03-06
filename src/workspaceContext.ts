@@ -511,3 +511,82 @@ function resolveWorkspacePath(relOrAbs: string): string | undefined {
   if (!root) return undefined;
   return path.join(root, relOrAbs);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Token budget management
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Minimal structural type compatible with ChatMessage (avoids circular import). */
+interface HistoryMessage {
+  role: string;
+  content: string | null;
+}
+
+/**
+ * Rough token count for a message.
+ *
+ * Heuristic: 1 token ≈ 3.5 chars on average (accounts for both ASCII code and
+ * mixed CJK / code text).  Each message also has ~4 overhead tokens for the
+ * role/name wrappers that OpenAI-compatible APIs charge.
+ */
+export function estimateTokens(msg: HistoryMessage): number {
+  const content =
+    typeof msg.content === "string"
+      ? msg.content
+      : JSON.stringify(msg.content ?? "");
+  return 4 + Math.ceil(content.length / 3.5);
+}
+
+/**
+ * Trim `history` **in-place** so the total estimated token count stays under
+ * `maxTokens`.
+ *
+ * Rules:
+ *  - The system prompt (index 0, role === "system") is always preserved.
+ *  - The most recent `keepTail` user+assistant turn pairs are always preserved
+ *    (default 3 pairs = 6 messages).
+ *  - Oldest non-system messages are removed first in pairs (user → assistant /
+ *    tool) to avoid orphaned tool results.
+ *  - Returns the number of tokens estimated after trimming (for diagnostics).
+ */
+export function trimHistoryToTokenBudget(
+  history: HistoryMessage[],
+  maxTokens: number,
+  keepTail = 6
+): number {
+  // Count total tokens
+  const total = () => history.reduce((s, m) => s + estimateTokens(m), 0);
+
+  if (total() <= maxTokens) {
+    return total();
+  }
+
+  // Identify the slice we're allowed to prune (everything between the system
+  // prompt and the protected tail).
+  const systemEnd = history[0]?.role === "system" ? 1 : 0;
+  const tailStart = Math.max(systemEnd, history.length - keepTail);
+  const prunable = tailStart - systemEnd; // how many messages can be removed
+
+  if (prunable <= 0) {
+    return total(); // nothing we can safely drop
+  }
+
+  // Remove messages from the oldest-prunable end until under budget.
+  let removed = 0;
+  while (total() > maxTokens && removed < prunable) {
+    history.splice(systemEnd, 1);
+    removed++;
+  }
+
+  return total();
+}
+
+/**
+ * Return a concise budget status string for UI display, e.g.
+ * "~4 200 / 8 000 tokens used".
+ */
+export function tokenBudgetLabel(history: HistoryMessage[], maxTokens: number): string {
+  const used = history.reduce((s, m) => s + estimateTokens(m), 0);
+  const pct = Math.round((used / maxTokens) * 100);
+  return `~${used.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${pct}%)`;
+}
