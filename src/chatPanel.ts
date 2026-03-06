@@ -218,6 +218,10 @@ class ChatCore {
 
   async handleMessage(message: HandleMessagePayload): Promise<void> {
     switch (message.type) {
+      case "webviewReady":
+        // The webview JS has wired up its message listener — safe to send init now.
+        await this.initChat();
+        return;
       case "send":
         await this.handleChatMessage(message.text ?? "");
         break;
@@ -360,7 +364,8 @@ export class ChatPanel {
       },
       null, this.disposables
     );
-    this.core.initChat();
+    // initChat() is now triggered by 'webviewReady' from the webview JS, ensuring
+    // the init message is never sent before the webview listener is wired up.
   }
 
   public static createOrShow(
@@ -680,6 +685,8 @@ function buildHtml(compact: boolean): string {
         case 'compressed': appendMessage('assistant','✅ History compressed. '+(msg.summary||'Context is now shorter.')); break;
       }
     });
+    // Signal to the extension host that the webview JS is ready to receive messages.
+    vscode.postMessage({ type: 'webviewReady' });
   </script>
 </body>
 </html>`;
@@ -750,8 +757,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (editor) this.core.lastActiveEditor = editor;
     });
     webviewView.onDidDispose(() => editorSub.dispose());
-
-    this.core.initChat();
+    // initChat() is triggered by 'webviewReady' from the webview JS.
   }
 
   public updateModelBadge(model: string): void {
