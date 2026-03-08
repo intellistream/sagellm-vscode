@@ -116,11 +116,9 @@ function shouldSkip(document: vscode.TextDocument, position: vscode.Position): b
   if (/^\s*(\/\/|#|--|\/\*)/.test(lineText)) return true;
 
   // Inside a string (heuristic: odd number of unescaped quotes before cursor)
-  // Also handles template literals (backticks) — skip inside them too.
   const singleQuotes = (beforeCursor.match(/(?<!\\)'/g) ?? []).length;
   const doubleQuotes = (beforeCursor.match(/(?<!\\)"/g) ?? []).length;
-  const backticks    = (beforeCursor.match(/(?<!\\)`/g) ?? []).length;
-  if (singleQuotes % 2 !== 0 || doubleQuotes % 2 !== 0 || backticks % 2 !== 0) return true;
+  if (singleQuotes % 2 !== 0 || doubleQuotes % 2 !== 0) return true;
 
   return false;
 }
@@ -151,7 +149,7 @@ function cleanCompletion(raw: string, fim: FimTokens): string {
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
-export class SageCoderInlineCompletionProvider
+export class SageLLMInlineCompletionProvider
   implements vscode.InlineCompletionItemProvider
 {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -159,14 +157,6 @@ export class SageCoderInlineCompletionProvider
   private nativeCompletionsAvailable: boolean | null = null;
 
   constructor(private readonly modelManager: ModelManager) {}
-
-  /**
-   * Reset cached endpoint availability so the next request re-probes.
-   * Call this when the gateway reconnects (e.g. after a restart).
-   */
-  resetCache(): void {
-    this.nativeCompletionsAvailable = null;
-  }
 
   async provideInlineCompletionItems(
     document: vscode.TextDocument,

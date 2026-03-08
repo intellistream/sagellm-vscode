@@ -26,14 +26,14 @@ export class StatusBarManager {
   }
 
   setConnecting(): void {
-    this.statusBar.text = "$(sync~spin) SageCoder";
+    this.statusBar.text = "$(sync~spin) SageLLM";
     this.statusBar.tooltip = "Connecting to sagellm-gateway...";
     this.statusBar.backgroundColor = undefined;
   }
 
   setError(message: string): void {
-    this.statusBar.text = "$(error) SageCoder";
-    this.statusBar.tooltip = `SageCoder: ${message}\nClick to open chat`;
+    this.statusBar.text = "$(error) SageLLM";
+    this.statusBar.tooltip = `SageLLM: ${message}\nClick to open chat`;
     this.statusBar.backgroundColor = new vscode.ThemeColor(
       "statusBarItem.errorBackground"
     );
@@ -41,7 +41,7 @@ export class StatusBarManager {
 
   private update(): void {
     if (!this.gatewayRunning) {
-      this.statusBar.text = "$(circle-slash) SageCoder";
+      this.statusBar.text = "$(circle-slash) SageLLM";
       this.statusBar.tooltip =
         "sagellm-gateway not connected — click to open chat and check status";
       this.statusBar.backgroundColor = new vscode.ThemeColor(
@@ -49,7 +49,7 @@ export class StatusBarManager {
       );
     } else {
       const model = this.currentModel ? ` (${this.currentModel})` : "";
-      this.statusBar.text = `$(hubot) SageCoder${model}`;
+      this.statusBar.text = `$(hubot) SageLLM${model}`;
       this.statusBar.tooltip = `sagellm-gateway connected${model}\nClick to open chat`;
       this.statusBar.backgroundColor = undefined;
     }

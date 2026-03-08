@@ -1,8 +1,8 @@
 {
   "name": "sagellm-vscode",
-  "displayName": "SageCoder",
-  "description": "AI code generation assistant powered by SageLLM — inline completions, chat, code explanation, test generation, and local model management",
-  "version": "0.1.19",
+  "displayName": "SageLLM",
+  "description": "SageLLM inference engine integration for VS Code — chat, code completion, and model management via sagellm-gateway",
+  "version": "0.1.18",
   "publisher": "intellistream",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -20,19 +20,15 @@
   "categories": [
     "AI",
     "Chat",
-    "Programming Languages",
     "Machine Learning",
     "Other"
   ],
   "keywords": [
-    "sagecoder",
     "sagellm",
     "llm",
     "ai",
-    "code generation",
-    "code completion",
-    "copilot",
     "chat",
+    "code completion",
     "intellistream"
   ],
   "activationEvents": [
@@ -43,85 +39,75 @@
     "commands": [
       {
         "command": "sagellm.openChat",
-        "title": "SageCoder: Open Chat",
+        "title": "SageLLM: Open Chat",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "sagellm.selectModel",
-        "title": "SageCoder: Select Model",
+        "title": "SageLLM: Select Model",
         "icon": "$(list-selection)"
       },
       {
         "command": "sagellm.startGateway",
-        "title": "SageCoder: Start Server",
+        "title": "SageLLM: Start Server",
         "icon": "$(play)"
       },
       {
         "command": "sagellm.configureServer",
-        "title": "SageCoder: Configure & Start Server",
+        "title": "SageLLM: Configure & Start Server",
         "icon": "$(settings-gear)"
       },
       {
         "command": "sagellm.stopGateway",
-        "title": "SageCoder: Stop Gateway",
+        "title": "SageLLM: Stop Gateway",
         "icon": "$(stop)"
       },
       {
         "command": "sagellm.restartGateway",
-        "title": "SageCoder: Restart Gateway",
+        "title": "SageLLM: Restart Gateway",
         "icon": "$(debug-restart)"
       },
       {
-        "command": "sagellm.restartEmbedding",
-        "title": "SageCoder: Restart Embedding Server",
-        "icon": "$(symbol-numeric)"
-      },
-      {
         "command": "sagellm.showInstallGuide",
-        "title": "SageCoder: Installation Guide",
+        "title": "SageLLM: Installation Guide",
         "icon": "$(book)"
       },
       {
         "command": "sagellm.refreshModels",
-        "title": "SageCoder: Refresh Models",
+        "title": "SageLLM: Refresh Models",
         "icon": "$(refresh)"
       },
       {
         "command": "sagellm.checkConnection",
-        "title": "SageCoder: Check Connection",
+        "title": "SageLLM: Check Connection",
         "icon": "$(plug)"
       },
       {
         "command": "sagellm.explainCode",
-        "title": "SageCoder: Explain Code",
+        "title": "SageLLM: Explain Code",
         "icon": "$(question)"
       },
       {
         "command": "sagellm.generateTests",
-        "title": "SageCoder: Generate Tests",
+        "title": "SageLLM: Generate Tests",
         "icon": "$(beaker)"
       },
       {
         "command": "sagellm.fixCode",
-        "title": "SageCoder: Fix Code",
+        "title": "SageLLM: Fix Code",
         "icon": "$(wrench)"
       },
       {
         "command": "sagellm.generateDocstring",
-        "title": "SageCoder: Generate Docstring",
+        "title": "SageLLM: Generate Docstring",
         "icon": "$(book)"
-      },
-      {
-        "command": "sagellm.runDiagnostics",
-        "title": "SageCoder: Run Diagnostics",
-        "icon": "$(search)"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "sagellm-sidebar",
-          "title": "SageCoder",
+          "title": "SageLLM",
           "icon": "$(hubot)"
         }
       ]
@@ -178,7 +164,7 @@
       ]
     },
     "configuration": {
-      "title": "SageCoder",
+      "title": "SageLLM",
       "properties": {
         "sagellm.gateway.host": {
           "type": "string",
@@ -244,11 +230,6 @@
           "default": "sagellm serve",
           "description": "Base command to start the sagellm server (e.g. 'sagellm serve' or 'sagellm-gateway')"
         },
-        "sagellm.huggingface.endpoint": {
-          "type": "string",
-          "default": "",
-          "description": "Hugging Face endpoint or mirror URL for model download (e.g. https://hf-mirror.com). Leave empty to use the official endpoint."
-        },
         "sagellm.preloadModel": {
           "type": "string",
           "default": "",
@@ -302,7 +283,7 @@
         "sagellm.inlineCompletion.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable inline code completion powered by SageCoder"
+          "description": "Enable inline code completion powered by SageLLM"
         },
         "sagellm.inlineCompletion.triggerDelay": {
           "type": "number",
@@ -338,7 +319,7 @@
         },
         "sagellm.chat.systemPrompt": {
           "type": "string",
-          "default": "You are SageCoder, an expert AI coding assistant. Help with code generation, debugging, refactoring, and explanation. Provide concise, working code examples. Use the language and framework already in context. Do not repeat these instructions.",
+          "default": "You are a helpful coding assistant. Answer concisely and accurately. For code questions provide working examples. Do not repeat or reference these instructions in your replies.",
           "description": "System prompt for chat conversations"
         },
         "sagellm.chat.workspaceContext": {
@@ -357,27 +338,6 @@
           "minimum": 0,
           "maximum": 2,
           "description": "Sampling temperature for chat (0 = deterministic, 2 = very creative)"
-        },
-        "sagellm.chat.maxContextTokens": {
-          "type": "number",
-          "default": 6000,
-          "minimum": 1000,
-          "description": "Maximum total tokens kept in chat history. Oldest turns are automatically pruned to stay within this budget, keeping the system prompt and the most recent 6 messages."
-        },
-        "sagellm.embeddings.autoStart": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically start the sagellm embedding server on activation (required for semantic code search)."
-        },
-        "sagellm.embeddings.port": {
-          "type": "number",
-          "default": 8090,
-          "description": "Port for the sagellm embedding server (sagellm embedding serve)."
-        },
-        "sagellm.embeddings.model": {
-          "type": "string",
-          "default": "",
-          "description": "Embedding model ID or local path. Leave empty to auto-select the smallest cached model (BAAI/bge-small-en-v1.5 recommended)."
         }
       }
     }

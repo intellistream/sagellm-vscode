@@ -52,6 +52,3 @@ export const SAGE_PORTS = {
 
 /** Default port the extension connects to (sagellm serve full-stack). */
 export const DEFAULT_GATEWAY_PORT = SAGE_PORTS.SAGELLM_SERVE_PORT; // 8901
-
-/** Default port for the sagellm embedding server (sagellm embedding serve). */
-export const DEFAULT_EMBEDDING_PORT = SAGE_PORTS.EMBEDDING_DEFAULT; // 8090

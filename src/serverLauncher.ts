@@ -5,13 +5,11 @@
 import * as vscode from "vscode";
 import * as cp from "child_process";
 import * as fs from "fs";
-import * as http from "http";
 import * as path from "path";
 import * as os from "os";
 import { checkHealth, fetchModels } from "./gatewayClient";
 import { StatusBarManager } from "./statusBar";
-import { DEFAULT_GATEWAY_PORT, DEFAULT_EMBEDDING_PORT } from "./sagePorts";
-import { isModelDownloadCorrupt, offerRepairIfCorrupt } from "./diagnostics";
+import { DEFAULT_GATEWAY_PORT } from "./sagePorts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Model catalog
@@ -23,12 +21,6 @@ interface CatalogModel {
   vram: string;     // minimum VRAM / RAM needed
   tags: string[];   // e.g. ["chat","fast","cpu-ok"]
   desc: string;     // one-line description
-}
-
-let modelDownloadInProgress = false;
-
-export function isModelDownloadInProgress(): boolean {
-  return modelDownloadInProgress;
 }
 
 export const MODEL_CATALOG: CatalogModel[] = [
@@ -60,141 +52,7 @@ function hfDirName(modelId: string): string {
   return "models--" + modelId.replace(/\//g, "--");
 }
 
-function expandHomeDir(input: string): string {
-  if (!input) return input;
-  if (input.startsWith("~/")) {
-    return path.join(os.homedir(), input.slice(2));
-  }
-  return input;
-}
-
-function hasModelWeights(dir: string): boolean {
-  try {
-    const stack = [dir];
-    while (stack.length) {
-      const cur = stack.pop()!;
-      for (const entry of fs.readdirSync(cur, { withFileTypes: true })) {
-        const full = path.join(cur, entry.name);
-        if (entry.isDirectory()) {
-          stack.push(full);
-          continue;
-        }
-        if (
-          entry.name.endsWith(".safetensors") ||
-          entry.name.endsWith(".gguf") ||
-          entry.name.endsWith(".bin")
-        ) {
-          return true;
-        }
-      }
-    }
-  } catch { /* ignore */ }
-  return false;
-}
-
-/** Cached result of workstationModelDirs(), cleared when workspace folders change. */
-let _workstationDirsCache: string[] | null = null;
-vscode.workspace.onDidChangeWorkspaceFolders(() => { _workstationDirsCache = null; });
-
-function workstationModelDirs(): string[] {
-  if (_workstationDirsCache) return _workstationDirsCache;
-  const dirs = new Set<string>();
-  dirs.add(path.join(os.homedir(), "Downloads", "sagellm-models"));
-
-  for (const folder of vscode.workspace.workspaceFolders ?? []) {
-    const wsPath = folder.uri.fsPath;
-    if (path.basename(wsPath) !== "sagellm-workstation") continue;
-
-    const ini = path.join(wsPath, "config.ini");
-    try {
-      const txt = fs.readFileSync(ini, "utf8");
-      const m = txt.match(/^\s*models_dir\s*=\s*(.+)\s*$/m);
-      if (m && m[1]) {
-        dirs.add(expandHomeDir(m[1].trim()));
-      }
-    } catch { /* ignore */ }
-  }
-
-  _workstationDirsCache = [...dirs];
-  return _workstationDirsCache;
-}
-
-function localWorkstationModelPath(modelId: string): string | undefined {
-  const shortId = modelId.split("/").pop() ?? modelId;
-  const candidates = [modelId, shortId];
-
-  for (const baseDir of workstationModelDirs()) {
-    for (const candidate of candidates) {
-      const modelDir = path.join(baseDir, candidate);
-      if (fs.existsSync(modelDir) && hasModelWeights(modelDir)) {
-        return modelDir;
-      }
-    }
-  }
-  return undefined;
-}
-
-interface WorkstationLocalModel {
-  idOrPath: string;
-  display: string;
-  description: string;
-}
-
-function discoverWorkstationLocalModels(): WorkstationLocalModel[] {
-  const out: WorkstationLocalModel[] = [];
-  const seen = new Set<string>();
-
-  const byShort = new Map<string, string>();
-  for (const model of MODEL_CATALOG) {
-    const short = model.id.split("/").pop() ?? model.id;
-    byShort.set(short, model.id);
-  }
-
-  for (const baseDir of workstationModelDirs()) {
-    if (!fs.existsSync(baseDir)) continue;
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(baseDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const full = path.join(baseDir, entry.name);
-      if (!hasModelWeights(full)) continue;
-
-      const mapped = byShort.get(entry.name);
-      if (mapped) {
-        if (!seen.has(mapped)) {
-          seen.add(mapped);
-          out.push({
-            idOrPath: mapped,
-            display: mapped,
-            description: "workstation local",
-          });
-        }
-        continue;
-      }
-
-      if (!seen.has(full)) {
-        seen.add(full);
-        out.push({
-          idOrPath: full,
-          display: entry.name,
-          description: "workstation local path",
-        });
-      }
-    }
-  }
-
-  return out;
-}
-
 export function isModelDownloaded(modelId: string): boolean {
-  if (localWorkstationModelPath(modelId)) {
-    return true;
-  }
   const dir = path.join(hfCacheDir(), hfDirName(modelId));
   return fs.existsSync(dir);
 }
@@ -209,14 +67,6 @@ function localModelIds(): Set<string> {
       }
     }
   } catch { /* ignore */ }
-
-  // Also treat workstation-local catalog models as downloaded.
-  for (const model of discoverWorkstationLocalModels()) {
-    if (!model.idOrPath.startsWith("/")) {
-      set.add(model.idOrPath);
-    }
-  }
-
   return set;
 }
 
@@ -225,199 +75,23 @@ function localModelIds(): Set<string> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Collect candidate Python executables in priority order.
- * Result is cached for the lifetime of the extension host (conda envs don't
- * change while VS Code is open).
- */
-let _candidatePythonsCache: string[] | null = null;
-function candidatePythons(): string[] {
-  if (_candidatePythonsCache) return _candidatePythonsCache;
-  const candidates: string[] = [];
-  const home = os.homedir();
-
-  // Active conda / venv prefix (present when VS Code is launched from a conda shell)
-  for (const envVar of ["CONDA_PREFIX", "VIRTUAL_ENV"]) {
-    const prefix = process.env[envVar];
-    if (prefix) {
-      candidates.push(path.join(prefix, "bin", "python"));
-    }
-  }
-
-  // Enumerate all envs under common conda base directories
-  for (const baseName of ["miniforge3", "miniconda3", "anaconda3", "mambaforge", "micromamba"]) {
-    const base = path.join(home, baseName);
-    if (!fs.existsSync(base)) { continue; }
-    // base env
-    candidates.push(path.join(base, "bin", "python"));
-    // all named envs
-    const envsDir = path.join(base, "envs");
-    try {
-      for (const envName of fs.readdirSync(envsDir)) {
-        candidates.push(path.join(envsDir, envName, "bin", "python"));
-      }
-    } catch { /* envs dir may not exist */ }
-  }
-
-  // ~/.local/bin (pip install --user)
-  candidates.push(path.join(home, ".local", "bin", "python3"));
-  candidates.push(path.join(home, ".local", "bin", "python"));
-
-  // System fallback (last resort)
-  candidates.push("python3", "python");
-
-  _candidatePythonsCache = [...new Set(candidates)];
-  return _candidatePythonsCache;
-}
-
-/**
- * huggingface_hub >= 1.0 moved the CLI to huggingface_hub.cli.hf
- * huggingface_hub < 1.0 used huggingface_hub.commands.huggingface_cli
- * Try both so we work across versions.
- */
-const HF_MODULE_CANDIDATES = [
-  "huggingface_hub.cli.hf",             // >= 1.0
-  "huggingface_hub.commands.huggingface_cli",  // < 1.0
-];
-
-/**
- * Resolve the huggingface-cli executable.
- *
- * Strategy (in order):
- *   1. huggingface-cli binary in PATH or any conda env bin dir
- *   2. python -m <hf_module> using the first Python that has huggingface_hub
- *
- * Returns null if nothing works; caller must show an actionable error.
- */
-async function resolveHfCli(): Promise<{ cmd: string; prefixArgs: string[] } | null> {
-  const home = os.homedir();
-
-  // ── 1. Binary search ────────────────────────────────────────────────────
-  //   a) system PATH
-  const whichCmd = process.platform === "win32" ? "where huggingface-cli" : "which huggingface-cli";
-  const found = await execQuick(whichCmd, 3000);
-  if (found) {
-    return { cmd: found.split(/\r?\n/)[0].trim(), prefixArgs: [] };
-  }
-
-  //   b) bin dirs alongside every candidate Python
-  const binDirs = [
-    path.join(home, ".local", "bin"),
-    ...candidatePythons()
-      .filter((p) => path.isAbsolute(p))
-      .map((p) => path.dirname(p)),
-  ];
-  for (const dir of [...new Set(binDirs)]) {
-    const cli = path.join(dir, "huggingface-cli");
-    if (fs.existsSync(cli)) {
-      return { cmd: cli, prefixArgs: [] };
-    }
-  }
-
-  // ── 2. Python module fallback ────────────────────────────────────────────
-  for (const py of candidatePythons()) {
-    if (path.isAbsolute(py) && !fs.existsSync(py)) { continue; }
-    // Quick import check
-    const canImport = await execQuick(
-      `"${py}" -c "import huggingface_hub" 2>/dev/null && echo ok`,
-      5000
-    );
-    if (!canImport.includes("ok")) { continue; }
-
-    // Find the first module path that actually works with this Python
-    for (const mod of HF_MODULE_CANDIDATES) {
-      const modOk = await execQuick(
-        `"${py}" -m ${mod} --help 2>/dev/null && echo ok`,
-        5000
-      );
-      if (modOk.includes("ok")) {
-        return { cmd: py, prefixArgs: ["-m", mod] };
-      }
-    }
-  }
-
-  return null; // nothing found
-}
-
-/**
- * Download a HuggingFace model using huggingface-cli (with automatic PATH resolution).
+ * Download a HuggingFace model using huggingface-cli.
  * Shows a cancellable VS Code progress notification.
  * Returns true on success, false if cancelled or failed.
  */
 export async function downloadModel(modelId: string): Promise<boolean> {
-  modelDownloadInProgress = true;
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: `SageCoder: Downloading ${modelId}`,
+      title: `SageLLM: Downloading ${modelId}`,
       cancellable: true,
     },
     async (progress, token) => {
-      const cfg = vscode.workspace.getConfiguration("sagellm");
-      const hfEndpoint = cfg.get<string>("huggingface.endpoint", "").trim();
-      const hfCli = await resolveHfCli();
-      if (!hfCli) {
-        const action = await vscode.window.showErrorMessage(
-          "SageCoder: 未找到 huggingface_hub。请在 sage conda 环境中运行：\n" +
-          "  pip install \"huggingface_hub>=1.0.0\"",
-          "复制安装命令"
-        );
-        if (action === "复制安装命令") {
-          vscode.env.clipboard.writeText('pip install "huggingface_hub>=1.0.0"');
-        }
-        modelDownloadInProgress = false;
-        return false;
-      }
-      const { cmd, prefixArgs } = hfCli;
-
-      // Resolve the destination directory inside workstation's models_dir
-      const shortName = modelId.split("/").pop() ?? modelId;
-      const primaryModelsDir = workstationModelDirs()[0];
-      const localDir = path.join(primaryModelsDir, shortName);
-      try {
-        fs.mkdirSync(localDir, { recursive: true });
-      } catch { /* ignore */ }
-
-      const downloadArgs = [
-        ...prefixArgs,
-        "download",
-        modelId,
-        "--local-dir", localDir,
-        "--include", "*.safetensors",
-        "--include", "*.safetensors.index.json",
-        "--include", "*.gguf",
-        "--include", "*.json",
-        "--include", "tokenizer.model",
-        "--include", "*.tiktoken",
-        "--include", "*.txt",
-        "--exclude", "*.bin",
-        "--exclude", "*.pt",
-        "--exclude", "*.h5",
-        "--exclude", "*.ot",
-        "--exclude", "*.msgpack",
-        "--exclude", "*.onnx",
-        "--exclude", "*.ckpt",
-        "--exclude", "*.tar",
-        "--exclude", "*.zip",
-        "--exclude", "*.md",
-        "--exclude", "*.png",
-        "--exclude", "*.jpg",
-        "--exclude", "*.jpeg",
-        "--exclude", "*.webp",
-      ];
       return new Promise<boolean>((resolve) => {
         const proc = cp.spawn(
-          cmd,
-          downloadArgs,
-          {
-            env: {
-              ...process.env,
-              HF_HUB_OFFLINE: "0",
-              TRANSFORMERS_OFFLINE: "0",
-              HF_HUB_ETAG_TIMEOUT: "10",
-              HF_HUB_DOWNLOAD_TIMEOUT: "30",
-              ...(hfEndpoint ? { HF_ENDPOINT: hfEndpoint } : {}),
-            },
-          }
+          "huggingface-cli",
+          ["download", modelId, "--resume-download"],
+          { env: { ...process.env } }
         );
 
         let lastPct = 0;
@@ -458,34 +132,24 @@ export async function downloadModel(modelId: string): Promise<boolean> {
         proc.on("close", (code) => {
           if (code === 0) {
             progress.report({ increment: 100 - lastPct, message: "完成 ✓" });
-            modelDownloadInProgress = false;
             resolve(true);
           } else if (token.isCancellationRequested) {
-            modelDownloadInProgress = false;
             resolve(false);
           } else {
-            if (stderr.includes("LocalEntryNotFoundError")) {
-              vscode.window.showErrorMessage(
-                "SageCoder: 无法访问 Hugging Face（可能网络受限或离线模式开启）。请在设置中填写 sagellm.huggingface.endpoint（例如 https://hf-mirror.com），或先在终端运行 `hf auth login` 后重试。"
-              );
-            }
             vscode.window.showErrorMessage(
-              `SageCoder: 下载失败 (exit ${code}).\n${stderr.slice(-300)}`
+              `SageLLM: 下载失败 (exit ${code}).\n${stderr.slice(-300)}`
             );
-            modelDownloadInProgress = false;
             resolve(false);
           }
         });
 
         proc.on("error", (err) => {
-          vscode.window.showErrorMessage(`SageCoder: 无法运行 huggingface-cli: ${err.message}`);
-          modelDownloadInProgress = false;
+          vscode.window.showErrorMessage(`SageLLM: 无法运行 huggingface-cli: ${err.message}`);
           resolve(false);
         });
 
         token.onCancellationRequested(() => {
           proc.kill("SIGTERM");
-          modelDownloadInProgress = false;
           resolve(false);
         });
       });
@@ -494,7 +158,7 @@ export async function downloadModel(modelId: string): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Backend detection  —  direct hardware queries (not parsing `sagellm info`)
+// Backend detection
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface BackendInfo {
@@ -504,82 +168,26 @@ export interface BackendInfo {
   description: string;
 }
 
-/** Run a shell command and return trimmed stdout, or "" on error/timeout. */
-function execQuick(cmd: string, timeoutMs = 6000): Promise<string> {
-  return new Promise((resolve) => {
-    cp.exec(cmd, { timeout: timeoutMs }, (_err, stdout) =>
-      resolve((stdout ?? "").trim())
-    );
-  });
-}
-
-/**
- * Probe for CUDA via nvidia-smi (fastest, no Python needed).
- * Returns a human-readable GPU name string, or "" if no CUDA GPU found.
- */
-async function detectCuda(): Promise<string> {
-  // nvidia-smi: one GPU name per line
-  const names = await execQuick(
-    "nvidia-smi --query-gpu=name --format=csv,noheader,nounits 2>/dev/null"
-  );
-  if (names) {
-    const first = names.split("\n")[0].trim();
-    const count = names.split("\n").filter(Boolean).length;
-    return count > 1 ? `${first} (+${count - 1} more)` : first;
-  }
-  return "";
-}
-
-/**
- * Probe for Ascend NPU via torch_npu.
- * Returns a device description string, or "" if not present.
- */
-async function detectAscend(): Promise<string> {
-  const out = await execQuick(
-    `python -c "import torch_npu; n=torch_npu.npu.device_count(); print(f'{n} NPU(s)')" 2>/dev/null`,
-    8000
-  );
-  return out.match(/^\d+\s*NPU/i) ? out : "";
-}
-
-/**
- * Detect all available backends by querying hardware directly.
- * CPU is always present.  CUDA and Ascend are detected in parallel.
- *
- * This replaces the previous approach of parsing `sagellm info` text output,
- * which was unreliable because Rich adds box-drawing chars / ANSI codes.
- */
-export async function detectBackendsFromCLI(): Promise<BackendInfo[]> {
-  const [cudaDesc, ascendDesc] = await Promise.all([
-    detectCuda(),
-    detectAscend(),
-  ]);
-
+export function detectBackends(infoOutput: string): BackendInfo[] {
   const backends: BackendInfo[] = [
-    {
-      id: "cpu",
-      label: "$(circuit-board) CPU",
-      detected: true,
-      description: "Always available",
-    },
+    { id: "cpu", label: "$(circuit-board) CPU", detected: true, description: "Always available" },
   ];
-  if (cudaDesc) {
-    backends.push({
-      id: "cuda",
-      label: "$(zap) CUDA (GPU)",
-      detected: true,
-      description: cudaDesc,
-    });
-  }
-  if (ascendDesc) {
-    backends.push({
-      id: "ascend",
-      label: "$(hubot) Ascend (昇腾 NPU)",
-      detected: true,
-      description: ascendDesc,
-    });
-  }
+  const hasCuda   = /CUDA.*✅|✅.*CUDA|✅.*\d+\s*device/i.test(infoOutput);
+  const hasAscend = /Ascend.*✅|✅.*Ascend|✅.*torch_npu/i.test(infoOutput);
+  const cudaMatch = infoOutput.match(/CUDA[^\n]*✅[^\n]*?-\s*(.+)|✅\s*\d+\s*device[^-]*-\s*(.+)/i);
+  const cudaName  = cudaMatch ? (cudaMatch[1] || cudaMatch[2] || "").trim().split("\n")[0] : "";
+  if (hasCuda)   backends.push({ id: "cuda",   label: "$(zap) CUDA (GPU)",          detected: true, description: cudaName || "NVIDIA GPU detected" });
+  if (hasAscend) backends.push({ id: "ascend", label: "$(hubot) Ascend (昇腾 NPU)", detected: true, description: "Ascend NPU detected" });
   return backends;
+}
+
+export async function detectBackendsFromCLI(): Promise<BackendInfo[]> {
+  return new Promise((resolve) => {
+    cp.exec("sagellm info", { timeout: 15000 }, (_err, stdout) => {
+      try { resolve(detectBackends(stdout ?? "")); }
+      catch { resolve([{ id: "cpu", label: "$(circuit-board) CPU", detected: true, description: "Always available" }]); }
+    });
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -611,7 +219,6 @@ export async function buildModelPickerItems(
     tryFetchGatewayModels(),
     Promise.resolve(localModelIds()),
   ]);
-  const workstationLocals = discoverWorkstationLocalModels();
 
   const seen = new Set<string>();
   const items: vscode.QuickPickItem[] = [];
@@ -645,27 +252,11 @@ export async function buildModelPickerItems(
   const downloadedItems: vscode.QuickPickItem[] = [];
   const addDownloaded = (id: string, desc: string) => {
     if (seen.has(id)) return; seen.add(id);
-    const corrupt = !id.startsWith("/") && isModelDownloadCorrupt(id);
-    downloadedItems.push({
-      label: corrupt ? `$(warning) ${id}` : `$(database) ${id}`,
-      description: corrupt ? `⚠️ 下载损坏，选择后可修复 — ${desc}` : `✅ ${desc}`,
-      detail: id,
-    });
+    downloadedItems.push({ label: `$(database) ${id}`, description: `✅ ${desc}`, detail: id });
   };
   downloadedCatalog.forEach((m) => addDownloaded(m.id, `${m.size} · ${m.vram} · ${m.desc}`));
   recentDownloaded.forEach((id) => addDownloaded(id, "recent"));
   downloadedExtra.forEach((id) => addDownloaded(id, "local cache"));
-  for (const local of workstationLocals) {
-    if (local.idOrPath.startsWith("/")) {
-      if (seen.has(local.idOrPath)) continue;
-      seen.add(local.idOrPath);
-      downloadedItems.push({
-        label: `$(database) ${local.display}`,
-        description: `✅ ${local.description}`,
-        detail: local.idOrPath,
-      });
-    }
-  }
 
   if (downloadedItems.length) {
     items.push({ label: "Downloaded", kind: SEP });
@@ -719,68 +310,41 @@ export async function promptAndStartServer(
 
   // ── 1. Detect backends ────────────────────────────────────────────────────
   sb?.setConnecting();
-  const backends = await detectBackendsFromCLI();
+  const backends     = await detectBackendsFromCLI();
+  const backendItems = backends.map((b) => ({
+    label: b.label,
+    description: b.detected ? `✅ ${b.description}` : b.description,
+    detail: b.id,
+  }));
 
   const savedBackend = cfg.get<string>("backend", "");
-
-  // If the saved backend is no longer detected (e.g. GPU driver removed),
-  // warn the user so they don't silently downgrade to CPU.
-  if (
-    savedBackend &&
-    savedBackend !== "cpu" &&
-    !backends.some((b) => b.id === savedBackend)
-  ) {
-    vscode.window.showWarningMessage(
-      `SageCoder: 上次使用的 "${savedBackend}" 后端未检测到，请重新选择。`
-    );
-  }
-
-  // If only CPU is available, skip the picker — nothing to choose.
-  let backendId: string;
-  if (backends.length === 1) {
-    backendId = "cpu";
-    await cfg.update("backend", "cpu", vscode.ConfigurationTarget.Global);
+  if (savedBackend) {
+    const idx = backendItems.findIndex((i) => i.detail === savedBackend);
+    if (idx > 0) backendItems.unshift(...backendItems.splice(idx, 1));
   } else {
-    const backendItems = backends.map((b) => {
-      const isSaved = b.id === savedBackend;
-      return {
-        label: isSaved ? `$(star-full) ${b.label}` : b.label,
-        description: `${isSaved ? "上次使用  " : ""}${b.description}`,
-        detail: b.id,
-      };
-    });
-    // Pre-sort: saved backend first, then by preference (GPU > CPU)
-    const savedIdx = backendItems.findIndex((i) => i.detail === savedBackend);
-    if (savedIdx > 0) {
-      backendItems.unshift(...backendItems.splice(savedIdx, 1));
-    } else if (!savedBackend) {
-      backendItems.reverse(); // prefer GPU when nothing saved
-    }
-
-    const pickedBackend = (await vscode.window.showQuickPick(backendItems, {
-      title: "SageCoder: 选择推理后端",
-      placeHolder: "$(star-full) 上次使用  · $(zap) GPU  · $(circuit-board) CPU",
-    })) as vscode.QuickPickItem | undefined;
-    if (!pickedBackend) {
-      sb?.setGatewayStatus(false);
-      return;
-    }
-    backendId = pickedBackend.detail!;
-    await cfg.update("backend", backendId, vscode.ConfigurationTarget.Global);
+    backendItems.reverse(); // prefer GPU
   }
+
+  const pickedBackend = await vscode.window.showQuickPick(backendItems, {
+    title: "SageLLM: Select Inference Backend",
+    placeHolder: "Choose hardware backend to use",
+  }) as vscode.QuickPickItem | undefined;
+  if (!pickedBackend) { sb?.setGatewayStatus(false); return; }
+  const backendId = pickedBackend.detail!;
+  await cfg.update("backend", backendId, vscode.ConfigurationTarget.Global);
 
   // ── 2. Pick model ─────────────────────────────────────────────────────────
   const recentModels = context.globalState.get<string[]>("sagellm.recentModels", []);
   const savedModel   = cfg.get<string>("preloadModel", "").trim();
 
   const modelItems = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: "SageCoder: Scanning models…", cancellable: false },
+    { location: vscode.ProgressLocation.Notification, title: "SageLLM: Scanning models…", cancellable: false },
     () => buildModelPickerItems(recentModels, savedModel)
   );
 
   const totalDownloadable = MODEL_CATALOG.filter((m) => !isModelDownloaded(m.id)).length;
   const pickedModel = await vscode.window.showQuickPick(modelItems, {
-    title: `SageCoder: Select Model  (☁️ ${totalDownloadable} available to download)`,
+    title: `SageLLM: Select Model  (☁️ ${totalDownloadable} available to download)`,
     placeHolder: "✅ downloaded · ☁️ will auto-download · $(edit) custom path",
     matchOnDescription: true,
     matchOnDetail: false,
@@ -790,7 +354,7 @@ export async function promptAndStartServer(
   let modelId = pickedModel.detail!;
   if (modelId === "__custom__") {
     modelId = (await vscode.window.showInputBox({
-      title: "SageCoder: Model Path or HuggingFace ID",
+      title: "SageLLM: Model Path or HuggingFace ID",
       prompt: "e.g.  Qwen/Qwen2.5-7B-Instruct  or  /models/my-model",
       value: savedModel,
       ignoreFocusOut: true,
@@ -799,31 +363,18 @@ export async function promptAndStartServer(
     modelId = modelId.trim();
   }
 
-  let launchModel = modelId;
+  // ── 3. Download if not cached ─────────────────────────────────────────────
+  if (!isModelDownloaded(modelId) && !modelId.startsWith("/")) {
+    const choice = await vscode.window.showInformationMessage(
+      `"${modelId}" 尚未下载。是否现在下载？`,
+      { modal: true },
+      "下载", "取消"
+    );
+    if (choice !== "下载") { sb?.setGatewayStatus(false); return; }
 
-  // ── 3. Check cache integrity / download if not cached ────────────────────
-  if (!modelId.startsWith("/")) {
-    const localWsPath = localWorkstationModelPath(modelId);
-    if (localWsPath) {
-      launchModel = localWsPath;
-      vscode.window.showInformationMessage(`SageCoder: 使用本地模型目录 ${localWsPath}`);
-    } else if (isModelDownloaded(modelId)) {
-      // Model is in HF cache — verify no shards are still .incomplete from a
-      // previously-interrupted download (would cause a load-time crash).
-      const repairOk = await offerRepairIfCorrupt(modelId);
-      if (!repairOk) { sb?.setGatewayStatus(false); return; }
-    } else {
-      const choice = await vscode.window.showInformationMessage(
-        `"${modelId}" 尚未下载。是否现在下载？`,
-        { modal: true },
-        "下载", "取消"
-      );
-      if (choice !== "下载") { sb?.setGatewayStatus(false); return; }
-
-      const ok = await downloadModel(modelId);
-      if (!ok) { sb?.setGatewayStatus(false); return; }
-      vscode.window.showInformationMessage(`✅ ${modelId} 下载完成`);
-    }
+    const ok = await downloadModel(modelId);
+    if (!ok) { sb?.setGatewayStatus(false); return; }
+    vscode.window.showInformationMessage(`✅ ${modelId} 下载完成`);
   }
 
   // ── 4. Persist choices ────────────────────────────────────────────────────
@@ -835,9 +386,9 @@ export async function promptAndStartServer(
 
   // ── 5. Launch server ──────────────────────────────────────────────────────
   const baseCmd = cfg.get<string>("gatewayStartCommand", "sagellm serve");
-  const cmd     = `${baseCmd} --backend ${backendId} --model ${launchModel} --port ${port}`;
+  const cmd     = `${baseCmd} --backend ${backendId} --model ${modelId} --port ${port}`;
   const terminal = vscode.window.createTerminal({
-    name: "SageCoder Server",
+    name: "SageLLM Server",
     isTransient: false,
     // Disable preflight canary — it loads the model via `transformers` BEFORE the
     // engine starts, doubling memory usage and adding 2–10 min to startup time.
@@ -847,7 +398,7 @@ export async function promptAndStartServer(
   });
   terminal.sendText(cmd);
   terminal.show(false);
-  vscode.window.showInformationMessage(`SageCoder: Starting ${backendId.toUpperCase()} · ${modelId}…`);
+  vscode.window.showInformationMessage(`SageLLM: Starting ${backendId.toUpperCase()} · ${modelId}…`);
 
   // ── 6. Poll until healthy (up to 5 min — model loading can be slow) ───────
   let attempts = 0;
@@ -857,176 +408,16 @@ export async function promptAndStartServer(
     if (await checkHealth()) {
       clearInterval(poll);
       sb?.setGatewayStatus(true);
-      vscode.window.showInformationMessage(`SageCoder: Server ready ✓  (${backendId} · ${modelId})`);
+      vscode.window.showInformationMessage(`SageLLM: Server ready ✓  (${backendId} · ${modelId})`);
     } else if (attempts >= maxPollAttempts) {
       clearInterval(poll);
       sb?.setError("Server start timed out");
-      vscode.window
-        .showWarningMessage(
-          "SageCoder: Server 5 分钟内未响应。",
-          "运行诊断",
-          "查看终端"
-        )
-        .then((choice) => {
-          if (choice === "运行诊断") {
-            vscode.commands.executeCommand("sagellm.runDiagnostics");
-          }
-        });
+      vscode.window.showWarningMessage("SageLLM: Server did not respond within 5 minutes. Check the terminal.");
     } else if (attempts % 20 === 0) {
       // Notify user every minute so they know it's still loading
       const elapsed = Math.round(attempts * 3 / 60);
-      vscode.window.setStatusBarMessage(`SageCoder: Loading model… (${elapsed} min elapsed)`, 5000);
+      vscode.window.setStatusBarMessage(`SageLLM: Loading model… (${elapsed} min elapsed)`, 5000);
     }
   }, 3000);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Embedding server auto-start
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Small embedding models suitable for local code semantic search.
- * Ordered by preference: smallest first so the default auto-pick is fast.
- */
-const EMBEDDING_CATALOG = [
-  { id: "BAAI/bge-small-en-v1.5",    size: "~33 MB",  desc: "Tiny English embedding, fastest startup" },
-  { id: "BAAI/bge-small-zh-v1.5",    size: "~95 MB",  desc: "Tiny Chinese+English embedding" },
-  { id: "sentence-transformers/all-MiniLM-L6-v2", size: "~90 MB", desc: "Multilingual, widely used" },
-  { id: "BAAI/bge-base-en-v1.5",     size: "~440 MB", desc: "Base English embedding, higher quality" },
-  { id: "BAAI/bge-m3",               size: "~570 MB", desc: "Multilingual, top quality" },
-];
-
-let _embeddingTerminal: vscode.Terminal | undefined;
-/** Tracks whether we've already shown the one-time download suggestion. */
-let _embeddingSuggestionShown = false;
-
-/**
- * Check whether a sagellm embedding server is responding at the given port.
- */
-export async function checkEmbeddingHealth(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const req = http.request(
-      { hostname: "localhost", port, path: "/health", method: "GET", timeout: 2000 },
-      (res) => { resolve(res.statusCode === 200); }
-    );
-    req.on("error", () => resolve(false));
-    req.on("timeout", () => { req.destroy(); resolve(false); });
-    req.end();
-  });
-}
-
-/**
- * Auto-start the embedding server if:
- *  1. It is not already running at the configured port.
- *  2. At least one embedding model is locally cached.
- *
- * If no model is cached, shows a one-time non-modal notification offering
- * to download a small embedding model.
- *
- * Designed to be called fire-and-forget at extension activation and after
- * the main gateway becomes healthy.
- */
-export async function autoStartEmbeddingServer(): Promise<void> {
-  const cfg  = vscode.workspace.getConfiguration("sagellm");
-  const autoStart = cfg.get<boolean>("embeddings.autoStart", true);
-  if (!autoStart) return;
-
-  const port  = cfg.get<number>("embeddings.port",  DEFAULT_EMBEDDING_PORT);
-  const model = cfg.get<string>("embeddings.model", "").trim();
-
-  // 1. Already healthy?  ─────────────────────────────────────────────────────
-  if (await checkEmbeddingHealth(port)) return;
-
-  // 2. Find which model to use ───────────────────────────────────────────────
-  let chosenModel: string | undefined;
-
-  if (model && isModelDownloaded(model)) {
-    // User-configured model is available
-    chosenModel = model;
-  } else {
-    // Auto-pick: first catalog entry that is already downloaded
-    chosenModel = EMBEDDING_CATALOG.find((m) => isModelDownloaded(m.id))?.id;
-  }
-
-  // 3. No model cached — offer to download once ─────────────────────────────
-  if (!chosenModel) {
-    if (_embeddingSuggestionShown) return;
-    _embeddingSuggestionShown = true;
-
-    const rec = EMBEDDING_CATALOG[0]; // smallest recommendation
-    const choice = await vscode.window.showInformationMessage(
-      `SageCoder: 下载一个小型本地 embedding 模型（${rec.id}，${rec.size}）可启用语义代码搜索。`,
-      "下载 & 启动",
-      "选择其他",
-      "以后再说",
-    );
-
-    if (choice === "以后再说" || choice === undefined) return;
-
-    if (choice === "选择其他") {
-      const items = EMBEDDING_CATALOG.map((m) => ({
-        label: m.id,
-        description: `${m.size} · ${m.desc}`,
-        detail: m.id,
-      }));
-      const picked = await vscode.window.showQuickPick(items, {
-        title: "SageCoder: 选择 Embedding 模型",
-        placeHolder: "较小的模型启动更快，适合本地 CPU 推理",
-      });
-      if (!picked) return;
-      chosenModel = picked.detail!;
-    } else {
-      chosenModel = rec.id;
-    }
-
-    // Download the selected model (reuse existing download flow)
-    const ok = await downloadModel(chosenModel);
-    if (!ok) return;
-  }
-
-  // 4. Launch the embedding server ───────────────────────────────────────────
-  _launchEmbeddingTerminal(chosenModel, port);
-
-  // 5. Update config with the chosen model so future activations remember it
-  await cfg.update("embeddings.model", chosenModel, vscode.ConfigurationTarget.Global);
-
-  // 6. Poll until healthy (up to 90 s — small models load in 5–20 s) ─────────
-  let attempts = 0;
-  const poll = setInterval(async () => {
-    attempts++;
-    if (await checkEmbeddingHealth(port)) {
-      clearInterval(poll);
-      vscode.window.setStatusBarMessage(`SageCoder: Embedding server ready ✓  (${chosenModel})`, 6000);
-    } else if (attempts >= 30) {
-      clearInterval(poll);
-      vscode.window.showWarningMessage(
-        `SageCoder: Embedding server (${chosenModel}) did not become healthy after 90 s.`,
-        "Show Terminal"
-      ).then((c) => { if (c === "Show Terminal") _embeddingTerminal?.show(); });
-    }
-  }, 3000);
-}
-
-function _launchEmbeddingTerminal(model: string, port: number): void {
-  // Dispose any stale terminal first
-  try { _embeddingTerminal?.dispose(); } catch { /* ignore */ }
-
-  const cmd = `sagellm embedding serve --model ${model} --port ${port}`;
-  _embeddingTerminal = vscode.window.createTerminal({
-    name: "SageCoder Embedding",
-    isTransient: false,
-    // Hidden by default — user can reveal via "Show Terminal" in the warning
-  });
-  _embeddingTerminal.sendText(cmd);
-  // Don't call .show() — keep it background so it doesn't grab focus
-}
-
-/**
- * Called by extension.ts to gracefully restart the embedding server after
- * the user explicitly triggers a refresh (e.g. sagellm.restartEmbedding).
- */
-export async function restartEmbeddingServer(): Promise<void> {
-  try { _embeddingTerminal?.dispose(); } catch { /* ignore */ }
-  _embeddingTerminal = undefined;
-  await autoStartEmbeddingServer();
-}
