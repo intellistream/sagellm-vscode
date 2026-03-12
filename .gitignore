@@ -4,3 +4,8 @@ out/
 *.vsix
 .vscode-test/
 coverage/
+.env
+.env.local
+.env.*
+!.env.example
+!.env.template

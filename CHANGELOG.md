@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `.gitignore` 现在默认忽略本地 `.env` / `.env.local` / `.env.*` 配置文件，同时保留 `.env.example` / `.env.template` 模板文件可提交，避免扩展开发时误提交本地凭证。
 - **Code block toolbar** — every code block in chat now has a toolbar with **Copy** and **Apply** buttons. Copy writes the code to the clipboard; Apply inserts it at the cursor in the active editor (or replaces the selection), or opens a new untitled document if no editor is active.
 - **`write_file` tool** — the AI can now propose writing/creating files. A modal approval dialog is shown before any write, with a note on whether the file already exists. The written file is automatically opened in the editor.
 - **`run_command` tool** — the AI can propose running shell commands. A modal approval dialog shows the command and working directory before execution. Output is returned to the model.
